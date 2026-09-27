@@ -147,3 +147,29 @@ BUYER_REVIEW_OCR_MODEL=
 | POST | `/api/validate` | 对编辑后的评论再跑一遍规则检查 |
 | POST | `/api/export/markdown` | 导出 Markdown |
 | POST | `/api/export/excel` | 导出 Excel（.xlsx） |
+
+---
+
+## 六、版本记录：以后怎么找回这一版
+
+| 版本 | Git 标记 | 内容 |
+| --- | --- | --- |
+| v0.1.0 | 标签 `v0.1.0`（分支 `main` 的第一个提交） | 第一版可运行版本：文字/图片 → 产品事实卡 → 10 条模拟评论 → 编辑 / 单条重生成 / 复制 / 导出 Markdown 与 Excel |
+
+找回方法（在 `D:\评论\买家评论生成工具` 目录里执行）：
+
+```powershell
+cd "D:\评论\买家评论生成工具"
+
+git log --oneline --decorate     # 看全部历史，v0.1.0 就是第一版
+git show v0.1.0 --stat           # 看这一版改了哪些文件
+git checkout v0.1.0              # 把工作目录切回这一版
+git checkout main                # 切回最新版本
+```
+
+- 网页工具的入口：`启动.cmd`，地址 <http://127.0.0.1:8787>
+- 生成出来的成品示例：`exports\` 目录
+- 规则蓝本原文：`rules\买家评论生成规则_v0.4.3_完整版.md`
+
+> 仓库只在本机，没有推送到任何远端。`node_modules\`、`config.json`、`.env`、日志都不会入库，
+> 所以密钥不会被提交进历史。
