@@ -415,6 +415,35 @@ function candidatePlan(count) {
   return Math.max(16, Math.min(20, count + 8));
 }
 
+/** 把「一次生成要分几批、每批写多少条、附加什么要求」抽出来，预览与真实生成共用同一套逻辑 */
+function planBatches({ count, round, missing, selection, preferenceNote }) {
+  const askTotal = round === 1 ? Math.max(candidatePlan(count), count) : Math.max(missing * 3, 8);
+  const batchCount = askTotal >= 12 ? 2 : 1;
+  const perBatch = Math.ceil(askTotal / batchCount);
+  const extraNote = [preferenceNote, round === 1 ? '' : usedObservationNote(selection)].filter(Boolean).join('\n\n');
+  return { askTotal, batchCount, perBatch, extraNote };
+}
+
+/** 生成每一批要发送的完整 messages（预览与实际生成都用它） */
+function buildBatchMessages({ factCard, count, plan, round = 1 }) {
+  const batches = [];
+  for (let index = 0; index < plan.batchCount; index += 1) {
+    const focusHint = round === 1 ? BATCH_FOCUS[index % BATCH_FOCUS.length] : BATCH_FOCUS[2];
+    batches.push({
+      index: index + 1,
+      focusHint,
+      messages: candidateMessages({
+        factCard,
+        count,
+        candidateCount: plan.perBatch,
+        focusHint,
+        extraNote: plan.extraNote,
+      }),
+    });
+  }
+  return batches;
+}
+
 function usedObservationNote(selection) {
   const rows = selection.comments.map((item) => `${item.meta.focus || '—'}|${item.meta.result || '—'}|${item.meta.action || '—'}`);
   const rejectedRows = selection.rejected
@@ -495,24 +524,17 @@ async function generateComments(config, { factCard, count, options, onProgress }
     rounds = round;
     const missing = Math.max(count, 1) - (selection ? selection.comments.length : 0);
     if (round > 1 && missing <= 0) break;
-    const askTotal = round === 1 ? Math.max(candidatePlan(count), count) : Math.max(missing * 3, 8);
-    const batchCount = askTotal >= 12 ? 2 : 1;
-    const perBatch = Math.ceil(askTotal / batchCount);
-    const extraNote = [preferenceNote, round === 1 ? '' : usedObservationNote(selection)].filter(Boolean).join('\n\n');
+    const plan = planBatches({ count, round, missing, selection, preferenceNote });
+    const { batchCount } = plan;
 
     if (onProgress) onProgress(`第 ${round} 轮：分 ${batchCount} 批并发生成候选`);
     const jobs = [];
+    const batchPlan = buildBatchMessages({ factCard, count, plan, round });
     for (let index = 0; index < batchCount; index += 1) {
       jobs.push(
         askForJson(
           config,
-          candidateMessages({
-            factCard,
-            count,
-            candidateCount: perBatch,
-            focusHint: round === 1 ? BATCH_FOCUS[index % BATCH_FOCUS.length] : BATCH_FOCUS[2],
-            extraNote,
-          }),
+          batchPlan[index].messages,
           { maxTokens: perCallMaxTokens },
         )
           .then((result) => ({
@@ -788,6 +810,37 @@ async function handleValidate(res, body) {
   sendJson(res, 200, { results });
 }
 
+/**
+ * 提示词预览：不调用模型，只把「此刻按下生成会发给模型的完整内容」原样返回。
+ * 与真实生成共用 planBatches / buildBatchMessages，所以内容是一致的。
+ */
+async function handlePromptPreview(res, body) {
+  const factCard = body.factCard && typeof body.factCard === 'object' ? body.factCard : {};
+  const count = Math.min(20, Math.max(1, Number.parseInt(body.count, 10) || 10));
+  const preferenceNote = buildPreferenceNote(body.options);
+  const plan = planBatches({ count, round: 1, missing: count, selection: null, preferenceNote });
+  const batches = buildBatchMessages({ factCard, count, plan, round: 1 }).map((batch) => ({
+    index: batch.index,
+    focusHint: batch.focusHint,
+    messages: batch.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      chars: String(message.content).length,
+    })),
+  }));
+  const rules = loadRules();
+  sendJson(res, 200, {
+    count,
+    candidateCount: plan.askTotal,
+    batchCount: plan.batchCount,
+    perBatch: plan.perBatch,
+    preferenceNote,
+    batches,
+    rulesFile: rules.file,
+    warning: Object.keys(factCard).length ? '' : '还没有事实卡：下面是空事实卡的提示词，生成前请先识别并核对事实卡。',
+  });
+}
+
 async function handleExportMarkdown(res, body) {
   const comments = Array.isArray(body.comments) ? body.comments : [];
   if (!comments.length) {
@@ -881,6 +934,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (pathname === '/api/validate' && req.method === 'POST') {
       await handleValidate(res, await readJsonBody(req));
+      return;
+    }
+    if (pathname === '/api/prompt-preview' && req.method === 'POST') {
+      await handlePromptPreview(res, await readJsonBody(req));
       return;
     }
     if (pathname === '/api/export/markdown' && req.method === 'POST') {

@@ -16,6 +16,7 @@
       </div>
       <div class="topnav-right">
         <span class="model-status" id="model-status"><span class="dot"></span>正在读取配置…</span>
+        <button class="btn btn-ghost btn-sm" id="btn-prompt">提示词</button>
         <button class="btn btn-ghost btn-sm" id="btn-history">历史记录</button>
         <button class="btn btn-ghost btn-sm" id="btn-open-settings">设置</button>
       </div>
@@ -187,6 +188,10 @@
                 </div>
               </div>
             </details>
+
+            <p class="foot-note">
+              想确认模型到底收到什么？<button type="button" class="btn-link" id="btn-prompt-inline">查看本次提示词与规则原文</button>
+            </p>
           </section>
 
           <div class="sticky-cta">
@@ -225,6 +230,27 @@
         </section>
       </div>
     </main>
+
+    <!-- 提示词 -->
+    <div class="modal hidden" id="prompt-modal">
+      <div class="modal-panel modal-wide">
+        <div class="modal-head">
+          <div class="modal-title">
+            <h2>生成提示词</h2>
+            <div class="tabs" id="prompt-tabs">
+              <button type="button" class="tab is-active" data-tab="preview">当前提示词</button>
+              <button type="button" class="tab" data-tab="rules">规则蓝本全文</button>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-ghost btn-sm" id="btn-copy-prompt">复制</button>
+            <button class="btn btn-ghost btn-sm" id="btn-close-prompt">关闭</button>
+          </div>
+        </div>
+        <p class="foot-note" id="prompt-note">正在读取…</p>
+        <div id="prompt-body" class="prompt-body"></div>
+      </div>
+    </div>
 
     <!-- 设置 -->
     <div class="modal hidden" id="settings-modal">

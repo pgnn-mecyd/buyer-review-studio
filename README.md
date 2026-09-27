@@ -168,6 +168,7 @@ BUYER_REVIEW_OCR_MODEL=
 - 配色只有白、灰、黑、Apple Blue（`#0071E3`），警告才用黄色，删除才用红色。
 - 圆角三档（20/16/12），间距走 8pt Grid，页面最大宽度 1560px。
 - 窄于 1024px 自动变成单栏：产品配置 → 评论策略 → 生成按钮 → 生成结果。
+- 顶部导航和评论策略卡片里都有 **「提示词」** 入口：可以查看本次生成的**完整提示词**（每一批的系统提示 + 用户提示，含事实卡与策略）以及**规则蓝本原文**，都支持一键复制。预览不调用模型，不消耗额度。
 
 ## 六、接口一览（都在服务端调用模型）
 
@@ -181,6 +182,8 @@ BUYER_REVIEW_OCR_MODEL=
 | POST | `/api/comments` | 生成 10 条（候选 → 自检 → 去重 → 筛选） |
 | POST | `/api/comments/regenerate` | 单条重新生成 |
 | POST | `/api/validate` | 对编辑后的评论再跑一遍规则检查 |
+| POST | `/api/prompt-preview` | 预览本次会发给模型的完整提示词（不调用模型） |
+| GET | `/api/rules` | 读取规则蓝本原文 |
 | POST | `/api/export/markdown` | 导出 Markdown |
 | POST | `/api/export/excel` | 导出 Excel（.xlsx） |
 

@@ -1195,6 +1195,122 @@ async function testConnection() {
 }
 
 /* --------------------------------------------------------- *
+ * 提示词预览
+ * --------------------------------------------------------- */
+
+let promptTab = 'preview';
+let promptCache = null;
+
+async function openPromptModal() {
+  $('#prompt-modal').classList.remove('hidden');
+  promptTab = 'preview';
+  promptCache = null;
+  renderPromptTabs();
+  await renderPromptBody();
+}
+
+function renderPromptTabs() {
+  document.querySelectorAll('#prompt-tabs .tab').forEach((tab) => {
+    tab.classList.toggle('is-active', tab.dataset.tab === promptTab);
+  });
+}
+
+async function renderPromptBody() {
+  const body = $('#prompt-body');
+  const note = $('#prompt-note');
+  body.innerHTML = '<p class="foot-note">正在生成预览…</p>';
+
+  if (promptTab === 'rules') {
+    try {
+      const rules = await api('/api/rules');
+      note.textContent = `规则蓝本原文（${rules.file ? rules.file.split('\\').pop() : '内置版本'}），完整嵌入生成时的系统提示里。`;
+      body.innerHTML = '';
+      const block = document.createElement('div');
+      block.className = 'prompt-block';
+      const pre = document.createElement('pre');
+      pre.className = 'prompt-pre';
+      pre.textContent = rules.text;
+      block.appendChild(pre);
+      body.appendChild(block);
+      promptCache = rules.text;
+    } catch (error) {
+      note.textContent = `读取失败：${error.message}`;
+    }
+    return;
+  }
+
+  if (promptCache && promptCache.kind === 'preview') {
+    renderPromptPreview(promptCache.data);
+    return;
+  }
+
+  try {
+    const data = await api('/api/prompt-preview', {
+      body: { factCard: state.factCard || {}, count: currentCount(), options: state.options },
+    });
+    promptCache = { kind: 'preview', data };
+    renderPromptPreview(data);
+  } catch (error) {
+    note.textContent = `预览失败：${error.message}`;
+    body.innerHTML = '';
+  }
+}
+
+function renderPromptPreview(data) {
+  const body = $('#prompt-body');
+  const note = $('#prompt-note');
+  note.textContent = [
+    `按下生成后，会并发发送 ${data.batchCount} 批请求，共约 ${data.candidateCount} 条候选`,
+    `每批 ${data.perBatch} 条`,
+    data.warning || '',
+  ].filter(Boolean).join('　｜　');
+
+  body.innerHTML = '';
+  data.batches.forEach((batch) => {
+    const block = document.createElement('div');
+    block.className = 'prompt-block';
+
+    const header = document.createElement('header');
+    const title = document.createElement('span');
+    title.textContent = `批次 ${batch.index} 侧重`;
+    const hint = document.createElement('span');
+    hint.className = 'foot-note';
+    hint.textContent = batch.focusHint;
+    header.append(title, hint);
+    block.appendChild(header);
+
+    batch.messages.forEach((message) => {
+      const part = document.createElement('div');
+      part.className = 'prompt-part';
+      const h4 = document.createElement('h4');
+      h4.textContent = message.role === 'system' ? '系统提示（含规则蓝本全文）' : '用户提示（含事实卡与本次策略）';
+      const size = document.createElement('span');
+      size.className = 'foot-note';
+      size.textContent = `${message.chars} 字符`;
+      h4.appendChild(size);
+      const pre = document.createElement('pre');
+      pre.className = 'prompt-pre';
+      pre.textContent = message.content;
+      part.append(h4, pre);
+      block.appendChild(part);
+    });
+
+    body.appendChild(block);
+  });
+  promptCache = { kind: 'preview', data };
+}
+
+function currentPromptText() {
+  if (promptTab === 'rules') return typeof promptCache === 'string' ? promptCache : '';
+  if (promptCache && promptCache.kind === 'preview') {
+    return promptCache.data.batches
+      .map((batch) => [`===== 批次 ${batch.index}｜${batch.focusHint} =====`, ...batch.messages.map((m) => `--- ${m.role} ---\n${m.content}`)].join('\n\n'))
+      .join('\n\n\n');
+  }
+  return '';
+}
+
+/* --------------------------------------------------------- *
  * 本地暂存
  * --------------------------------------------------------- */
 
@@ -1363,6 +1479,26 @@ function bindEvents() {
   $('#btn-close-history').addEventListener('click', () => $('#history-drawer').classList.add('hidden'));
   $('#history-drawer').addEventListener('click', (event) => {
     if (event.target === $('#history-drawer')) $('#history-drawer').classList.add('hidden');
+  });
+
+  // 提示词预览
+  $('#btn-prompt').addEventListener('click', openPromptModal);
+  $('#btn-prompt-inline').addEventListener('click', openPromptModal);
+  $('#btn-close-prompt').addEventListener('click', () => $('#prompt-modal').classList.add('hidden'));
+  $('#prompt-modal').addEventListener('click', (event) => {
+    if (event.target === $('#prompt-modal')) $('#prompt-modal').classList.add('hidden');
+  });
+  $('#prompt-tabs').addEventListener('click', (event) => {
+    const tab = event.target.closest('.tab');
+    if (!tab) return;
+    promptTab = tab.dataset.tab;
+    renderPromptTabs();
+    renderPromptBody();
+  });
+  $('#btn-copy-prompt').addEventListener('click', () => {
+    const text = currentPromptText();
+    if (!text) return toast('还没有可复制的内容', { bad: true });
+    copyText(text, '已复制提示词');
   });
 }
 
