@@ -209,6 +209,7 @@
             <div class="result-title">
               <h2>生成结果</h2>
               <span class="count-badge" id="result-count">0 条</span>
+              <span class="stream-status hidden" id="stream-status"></span>
             </div>
             <div class="result-actions">
               <button class="btn btn-ghost btn-sm" id="btn-regenerate-all" title="按当前策略重新生成一批">重新生成</button>
@@ -219,6 +220,13 @@
           </div>
 
           <div class="result-body">
+            <div class="stream-panel hidden" id="stream-panel">
+              <div class="stream-head">
+                <span class="stream-dot" aria-hidden="true"></span>
+                <span id="stream-text">正在分析产品信息…</span>
+              </div>
+              <ul class="stream-list" id="stream-list"></ul>
+            </div>
             <div class="empty empty-lg" id="results-empty">
               <p class="empty-title">还没有生成评论</p>
               <p>在左侧填写产品信息、核对事实卡，然后点「生成 N 条评论」。</p>

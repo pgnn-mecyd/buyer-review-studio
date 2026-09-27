@@ -198,4 +198,130 @@ async function listModels(config, { baseUrl, apiKey } = {}) {
   }
 }
 
-module.exports = { chat, listModels, ModelError, joinUrl };
+/**
+ * 真实流式调用（SSE）。
+ * 逐块回调 onContent(增量正文)，返回完整正文与用量；推理内容只统计长度，不往前端推。
+ *
+ * @param {object} options
+ * @param {(delta: string) => void} [options.onContent] 每收到一段正文就回调
+ * @param {() => void} [options.onFirstToken] 第一次收到正文时回调（用于统计首 token 耗时）
+ */
+async function chatStream(options) {
+  const {
+    config,
+    messages,
+    maxTokens = 32000,
+    temperature,
+    retries = 1,
+    onContent,
+    onFirstToken,
+    signal,
+  } = options;
+  if (!config.baseUrl) throw new ModelError('尚未配置模型接口地址。');
+  if (!config.apiKey) throw new ModelError('尚未配置模型密钥。');
+  if (!config.model) throw new ModelError('尚未配置模型 ID。');
+
+  const temp = temperature === undefined ? config.temperature : temperature;
+  let budget = maxTokens;
+  let escalations = 0;
+  let lastError;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const body = { model: config.model, messages, stream: true, stream_options: { include_usage: true }, max_tokens: budget };
+    if (temp !== null && temp !== undefined && temp !== false) body.temperature = temp;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    const onAbort = () => controller.abort();
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      const response = await fetch(joinUrl(config.baseUrl, '/chat/completions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}`, Accept: 'text/event-stream' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        const text = await response.text().catch(() => '');
+        throw new ModelError(describeHttpError(response.status, text), {
+          status: response.status,
+          retryable: response.status === 429 || response.status >= 500,
+        });
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let text = '';
+      let usage = null;
+      let finishReason = '';
+      let reasoningChars = 0;
+      let firstToken = false;
+
+      const handleData = (payload) => {
+        if (!payload || payload === '[DONE]') return;
+        let json;
+        try {
+          json = JSON.parse(payload);
+        } catch {
+          return; // 单段解析失败不影响整体，跳过这块
+        }
+        if (json.usage) usage = json.usage;
+        const choice = json.choices?.[0];
+        if (!choice) return;
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+        const delta = choice.delta || {};
+        if (typeof delta.reasoning_content === 'string') reasoningChars += delta.reasoning_content.length;
+        if (typeof delta.content === 'string' && delta.content) {
+          if (!firstToken) {
+            firstToken = true;
+            if (onFirstToken) onFirstToken();
+          }
+          text += delta.content;
+          if (onContent) onContent(delta.content);
+        }
+      };
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let index = buffer.indexOf('\n');
+        while (index >= 0) {
+          const line = buffer.slice(0, index).trim();
+          buffer = buffer.slice(index + 1);
+          if (line.startsWith('data:')) handleData(line.slice(5).trim());
+          index = buffer.indexOf('\n');
+        }
+      }
+      if (buffer.trim().startsWith('data:')) handleData(buffer.trim().slice(5).trim());
+
+      if (!text.trim()) {
+        if (finishReason === 'length' && budget < MAX_OUTPUT_TOKENS && escalations < 3) {
+          escalations += 1;
+          budget = Math.min(budget * 2, MAX_OUTPUT_TOKENS);
+          continue;
+        }
+        throw new ModelError(
+          finishReason === 'length'
+            ? `模型把全部输出预算用在了推理上（max_tokens=${budget}），没有产生正文。`
+            : '流式返回结束了，但没有收到正文内容。',
+          { retryable: false },
+        );
+      }
+      return { text, usage, model: config.model, finishReason, reasoningChars };
+    } catch (error) {
+      lastError = error instanceof ModelError ? error : new ModelError(`流式请求失败：${error && error.message ? error.message : error}`, { retryable: true });
+      if (!lastError.retryable || attempt === retries) break;
+      await sleep(1200 * (attempt + 1));
+    } finally {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+    }
+  }
+  throw lastError;
+}
+
+module.exports = { chat, chatStream, listModels, ModelError, joinUrl };

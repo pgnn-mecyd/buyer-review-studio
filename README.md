@@ -185,13 +185,67 @@ BUYER_REVIEW_OCR_MODEL=
 | POST | `/api/config/models` | 拉取接口下的真实模型 ID |
 | POST | `/api/config/test` | 连通性 + 读图能力探测 |
 | POST | `/api/facts` | 文字/图片 → 产品事实卡 |
-| POST | `/api/comments` | 生成 10 条（候选 → 自检 → 去重 → 筛选） |
+| POST | `/api/comments/stream` | **流式生成（SSE）**：逐条候选实时推送，最后推筛选结果（前端默认走这条） |
+| POST | `/api/comments` | 生成评论（非流式，作为流式不可用时的兜底） |
 | POST | `/api/comments/regenerate` | 单条重新生成 |
 | POST | `/api/validate` | 对编辑后的评论再跑一遍规则检查 |
 | POST | `/api/prompt-preview` | 预览本次会发给模型的完整提示词（不调用模型） |
 | GET | `/api/rules` | 读取规则蓝本原文 |
 | POST | `/api/export/markdown` | 导出 Markdown |
 | POST | `/api/export/excel` | 导出 Excel（.xlsx） |
+
+---
+
+## 七、生成性能与流式输出（第三阶段）
+
+### 候选数量与动态补齐
+
+- 目标 10 条时，**首轮只写 12 条候选**（旧版固定 18 条）。
+- 筛选后不足 10 条时，**只补缺口**：缺 n 条就写 n+1 条（至少 2 条），最多补 3 轮，不会整批重写。
+- 补生成时会带上「已采用的评论 + 已用过的关注点/结果/动作」，避免重复。
+- 达到最大轮数仍不足时，保留已有的合格评论并在自检报告里说明，不会卡死。
+
+### 真实流式（SSE）
+
+服务端用 `stream: true` 直连模型，逐 token 接收；**只有一条候选的 JSON 对象完整闭合后**才推给前端，
+所以右侧永远不会出现半条评论。事件序列：
+
+```
+generation_start → candidate_complete × N → generation_progress → filtering
+                 → (refill_start → candidate_complete…) → final_reviews → done
+```
+
+前端用 `fetch` + `ReadableStream` 读取（POST 也能走 SSE），生成期间：
+
+- 左侧按钮变成「生成中… 3/12」，右栏顶部显示「正在生成候选 3 / 12」
+- 右栏出现「候选（待筛选）」预览区，逐条追加**完整**候选
+- 收到 `final_reviews` 后清空预览区，用最终 10 条替换，不会重复展示
+- 流式链路失败会自动回退到 `/api/comments`，不让你白等
+
+### 性能数据怎么看
+
+自检报告底部会打印本次的真实数据，例如：
+
+```
+性能：总耗时 42.1s　首条完整候选 32.1s　首轮候选 12 条 → 合格 10 条　补生成 0 轮（0 条）
+token：input 11932　output 19371（推理 17931 · 正文 1440）
+```
+
+也可以直接用命令行压测（不经过浏览器）：
+
+```powershell
+node scripts/perf-stream.js 10                 # 打 8787 主实例
+node scripts/perf-stream.js 10 http://127.0.0.1:8798   # 打测试实例
+node scripts/verify-export.js "C:\Users\<你>\Downloads\xxx_模拟评论_xxx.xlsx"
+```
+
+### 测试开关
+
+想验证「候选不足时只补缺口」，用这个开关启动一个临时实例（端口 8798），首轮只会写一半候选：
+
+```powershell
+$env:BUYER_REVIEW_TEST_SHORT='1'; $env:BUYER_REVIEW_PORT='8798'; node server.js
+```
 
 ---
 

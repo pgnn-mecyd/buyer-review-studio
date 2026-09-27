@@ -290,6 +290,9 @@ function evaluateCandidate(candidate, factCard) {
   const violations = [...factResult.violations, ...positiveResult.violations, ...repetitionResult.violations];
   const warnings = [...factResult.warnings, ...positiveResult.warnings, ...repetitionResult.warnings];
   if (chars < 12) violations.push({ type: '文本过短或为空', detail: `${chars} 字` });
+  // 规则蓝本的长度上限：主体 55–85 字、长评 90–110 字，超过 120 字明显越界
+  if (chars > 120) violations.push({ type: '超出规则长度上限', detail: `${chars} 字（上限 120）` });
+  else if (chars > 112) warnings.push({ type: '略超长评上限', detail: `${chars} 字`, weight: 5 });
   if (/[#*`]|emoji|😀|😂|❤️|✨|🔥/.test(text) || /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text)) {
     violations.push({ type: '出现表情或标记符号', detail: '需去掉 emoji/符号' });
   }

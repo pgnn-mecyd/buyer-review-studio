@@ -12,7 +12,8 @@ const path = require('node:path');
 const os = require('node:os');
 
 const { loadConfig, saveConfig, maskKey } = require('./src/config');
-const { chat, listModels, ModelError } = require('./src/model');
+const { chat, chatStream, listModels, ModelError } = require('./src/model');
+const { CandidateStreamParser } = require('./src/stream-parse');
 const { factCardMessages, candidateMessages, regenerateMessages, repairMessages } = require('./src/prompts');
 const { parseLooseJson } = require('./src/jsonutil');
 const { selectComments, evaluateCandidate } = require('./src/validate');
@@ -411,14 +412,28 @@ async function buildFactCard(config, { productName, sellingPoints, images }) {
 
 function candidatePlan(count) {
   if (count <= 5) return Math.max(6, count * 2);
-  if (count >= 11 && count <= 15) return Math.ceil(count * 1.5);
-  return Math.max(16, Math.min(20, count + 8));
+  if (count >= 16) return Math.min(24, count + 4);
+  return count + 2; // 目标是 10 条时先写 12 条候选，不再固定 18 条
+}
+
+/** 最多补几轮，避免无限循环 */
+const MAX_REFILL_ROUNDS = 3;
+
+/**
+ * 测试开关：BUYER_REVIEW_TEST_SHORT=1 时首轮只写一半候选，
+ * 用来验证「不足 10 条时只补缺口」这条链路（见 README 性能测试章节）。
+ */
+const FORCE_SHORT_ROUND = process.env.BUYER_REVIEW_TEST_SHORT === '1';
+
+/** 补生成只补缺口（缺 n 条就写 n+1 条，至少 2 条），不再整批重写 */
+function refillPlan(missing) {
+  return Math.max(missing + 1, 2);
 }
 
 /** 把「一次生成要分几批、每批写多少条、附加什么要求」抽出来，预览与真实生成共用同一套逻辑 */
-function planBatches({ count, round, missing, selection, preferenceNote }) {
-  const askTotal = round === 1 ? Math.max(candidatePlan(count), count) : Math.max(missing * 3, 8);
-  const batchCount = askTotal >= 12 ? 2 : 1;
+function planBatches({ count, round, missing, selection, preferenceNote, initialOverride }) {
+  const askTotal = round === 1 ? initialOverride || candidatePlan(count) : refillPlan(missing);
+  const batchCount = askTotal >= 10 ? 2 : 1;
   const perBatch = Math.ceil(askTotal / batchCount);
   const extraNote = [preferenceNote, round === 1 ? '' : usedObservationNote(selection)].filter(Boolean).join('\n\n');
   return { askTotal, batchCount, perBatch, extraNote };
@@ -446,14 +461,17 @@ function buildBatchMessages({ factCard, count, plan, round = 1 }) {
 
 function usedObservationNote(selection) {
   const rows = selection.comments.map((item) => `${item.meta.focus || '—'}|${item.meta.result || '—'}|${item.meta.action || '—'}`);
-  const rejectedRows = selection.rejected
-    .slice(0, 12)
-    .map((item) => `被筛掉（${item.stage}：${item.reason}）`);
+  const adopted = selection.comments.map((item, index) => `${index + 1}. ${String(item.text).slice(0, 42)}…`);
+  const rejectedRows = selection.rejected.slice(0, 8).map((item) => `被筛掉（${item.stage}：${item.reason}）`);
   return [
-    '以下是上一轮已经使用或已经排除的内容，请避开这些关注点、结果与观察动作的组合，换用事实卡里尚未被使用的已知优点：',
+    '【已经采用、不要再写一遍的评论】',
+    ...adopted,
+    '',
+    '【已经用过的关注点｜正面结果｜观察动作】',
     ...rows.map((row) => `- ${row}`),
     ...rejectedRows.map((row) => `- ${row}`),
-    '如果事实卡里的已知优点已经用完，请用更短、更具体的表达区分侧重点，不要编造新事实，也不要加入缺点。',
+    '',
+    '请只补写上面没有的角度：换开头、换观察动作、换结果落点，避免改写已有评论；不要编造新事实，也不要加入缺点。',
   ].join('\n');
 }
 
@@ -520,7 +538,7 @@ async function generateComments(config, { factCard, count, options, onProgress }
   const perCallMaxTokens = Math.max(12000, Math.min(120000, config.maxTokens || 32000));
   const preferenceNote = buildPreferenceNote(options);
 
-  for (let round = 1; round <= 3; round += 1) {
+  for (let round = 1; round <= MAX_REFILL_ROUNDS; round += 1) {
     rounds = round;
     const missing = Math.max(count, 1) - (selection ? selection.comments.length : 0);
     if (round > 1 && missing <= 0) break;
@@ -794,6 +812,247 @@ async function handleRegenerate(res, body) {
   });
 }
 
+/**
+ * 流式生成（SSE）：真实调用 DeepSeek 的 stream:true 接口，
+ * 逐条候选完整后再推给前端，最后推筛选结果与性能数据。
+ */
+async function handleCommentsStream(req, res, body) {
+  const config = loadConfig();
+  const startedAt = Date.now();
+  const perf = {
+    startedAt: new Date().toISOString(),
+    target: 0,
+    initialCandidates: 0,
+    firstEventMs: null,
+    firstTokenMs: null,
+    firstCandidateMs: null,
+    firstRoundMs: null,
+    filterMs: null,
+    refillRounds: 0,
+    refillRequested: 0,
+    refillGenerated: 0,
+    candidatesTotal: 0,
+    validAfterFilter: 0,
+    finalCount: 0,
+    usage: { input: 0, output: 0, reasoning: 0 },
+  };
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  let clientGone = false;
+  const abort = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      clientGone = true;
+      abort.abort();
+    }
+  });
+
+  const send = (event, data) => {
+    if (clientGone || res.writableEnded) return;
+    if (perf.firstEventMs === null) perf.firstEventMs = Date.now() - startedAt;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  const heartbeat = setInterval(() => {
+    if (!clientGone && !res.writableEnded) res.write(': keep-alive\n\n');
+  }, 15000);
+
+  try {
+    if (!config.baseUrl || !config.apiKey || !config.model) {
+      send('error', { message: '模型尚未配置：请先在「设置」中填写接口地址、模型 ID 和密钥。' });
+      return;
+    }
+    const factCard = body.factCard;
+    if (!factCard || typeof factCard !== 'object') {
+      send('error', { message: '缺少产品事实卡，请先生成并核对事实卡。' });
+      return;
+    }
+
+    const count = Math.min(20, Math.max(1, Number.parseInt(body.count, 10) || 10));
+    const preferenceNote = buildPreferenceNote(body.options);
+    const perCallMaxTokens = Math.max(12000, Math.min(120000, config.maxTokens || 32000));
+    const initialCandidates = FORCE_SHORT_ROUND ? Math.max(2, Math.ceil(count / 2)) : candidatePlan(count);
+    perf.target = count;
+    perf.initialCandidates = initialCandidates;
+
+    send('generation_start', {
+      target: count,
+      candidates: initialCandidates,
+      initialCandidates,
+      refillPlan: '不足时只补缺口',
+      maxRefillRounds: MAX_REFILL_ROUNDS,
+    });
+
+    const pool = [];
+    const usages = [];
+    let selection = null;
+    let lastModel = config.model;
+
+    for (let round = 1; round <= MAX_REFILL_ROUNDS; round += 1) {
+      const missing = count - (selection ? selection.comments.length : 0);
+      if (round > 1 && missing <= 0) break;
+      const plan = planBatches({
+        count,
+        round,
+        missing,
+        selection,
+        preferenceNote,
+        initialOverride: round === 1 ? initialCandidates : null,
+      });
+      if (round > 1) {
+        perf.refillRounds += 1;
+        perf.refillRequested += plan.askTotal;
+        send('refill_start', { round, missing, generate: plan.askTotal, candidates: plan.askTotal });
+      }
+
+      const batchPlan = buildBatchMessages({ factCard, count, plan, round });
+      let completedInRound = 0;
+      let roundUsage = null;
+
+      const jobs = batchPlan.map(async (batch) => {
+        const parser = new CandidateStreamParser();
+        const result = await chatStream({
+          config,
+          messages: batch.messages,
+          maxTokens: perCallMaxTokens,
+          signal: abort.signal,
+          onFirstToken: () => {
+            if (perf.firstTokenMs === null) perf.firstTokenMs = Date.now() - startedAt;
+          },
+          onContent: (delta) => {
+            const items = parser.push(delta);
+            for (const item of items) {
+              const candidate = normalizeCandidate(item);
+              if (!candidate) continue;
+              pool.push(candidate);
+              completedInRound += 1;
+              if (perf.firstCandidateMs === null) perf.firstCandidateMs = Date.now() - startedAt;
+              send('candidate_complete', {
+                index: pool.length,
+                batch: batch.index,
+                text: candidate.文本,
+                focus: candidate.主关注点 || '',
+              });
+              send('generation_progress', { generated: pool.length, round, batch: batch.index });
+            }
+          },
+        });
+        // 流结束后兜底：万一数组没闭合，再整体解析一次
+        const leftovers = parser.finalize();
+        for (const item of leftovers) {
+          const candidate = normalizeCandidate(item);
+          if (!candidate) continue;
+          pool.push(candidate);
+          completedInRound += 1;
+          if (perf.firstCandidateMs === null) perf.firstCandidateMs = Date.now() - startedAt;
+          send('candidate_complete', { index: pool.length, batch: batch.index, text: candidate.文本, focus: candidate.主关注点 || '' });
+        }
+        return result;
+      });
+
+      const settled = await Promise.allSettled(jobs);
+      const failures = settled.filter((item) => item.status === 'rejected');
+      settled.forEach((item) => {
+        if (item.status !== 'fulfilled') return;
+        if (item.value.model) lastModel = item.value.model;
+        if (item.value.usage) {
+          usages.push(item.value.usage);
+          roundUsage = item.value.usage;
+        }
+      });
+
+      perf.candidatesTotal = pool.length;
+      if (round === 1) perf.firstRoundMs = Date.now() - startedAt;
+
+      if (!completedInRound && failures.length) {
+        if (round === MAX_REFILL_ROUNDS) throw failures[0].reason;
+        continue;
+      }
+      if (round > 1) perf.refillGenerated += completedInRound;
+
+      const filterStarted = Date.now();
+      send('filtering', { round, message: '正在筛选候选评论', candidates: pool.length });
+      selection = selectComments(pool, { factCard, count, seed: Date.now() + round });
+      if (round === 1) {
+        perf.validAfterFilter = selection.comments.length;
+        perf.filterMs = Date.now() - filterStarted;
+      }
+      if (selection.comments.length >= count) break;
+    }
+
+    if (!selection) throw new Error('生成失败：没有得到任何候选评论。');
+
+    const generatedAt = new Date().toLocaleString('zh-CN', { hour12: false });
+    const warnings = [];
+    selection.comments.forEach((item, index) => {
+      item.warnings.forEach((warning) => warnings.push({ index: index + 1, type: warning.type, detail: warning.detail }));
+    });
+    perf.finalCount = selection.comments.length;
+    perf.usage.input = sumUsage(usages).prompt_tokens;
+    perf.usage.output = sumUsage(usages).completion_tokens;
+    perf.usage.reasoning = usages.reduce(
+      (sum, usage) => sum + (usage?.completion_tokens_details?.reasoning_tokens || 0),
+      0,
+    );
+    perf.totalMs = Date.now() - startedAt;
+    perf.textTokens = Math.max(0, perf.usage.output - perf.usage.reasoning);
+
+    const report = {
+      model: lastModel,
+      generatedAt,
+      elapsedMs: Date.now() - startedAt,
+      rounds: perf.refillRounds + 1,
+      candidateCount: pool.length,
+      passed: selection.stats.passed,
+      rejectedCount: selection.stats.rejected,
+      selected: selection.comments.length,
+      length: { long: selection.stats.longCount, main: selection.stats.mainCount, short: selection.stats.shortCount },
+      emotions: selection.stats.emotions,
+      fillerOveruse: selection.stats.fillerOveruse,
+      focusOveruse: selection.stats.focusOveruse,
+      warnings,
+      rejected: selection.rejected.map((item) => ({ stage: item.stage, reason: item.reason, text: item.text })),
+      factSummary: factSummaryOf(factCard),
+      preferenceNote,
+      perf,
+    };
+
+    send('final_reviews', {
+      comments: selection.comments,
+      report,
+      model: lastModel,
+      generatedAt,
+    });
+    send('done', {
+      count: selection.comments.length,
+      target: count,
+      duration: perf.totalMs,
+      firstCandidateMs: perf.firstCandidateMs,
+      refillRounds: perf.refillRounds,
+      usage: perf.usage,
+    });
+
+    console.log(
+      `[生成] ${selection.comments.length}/${count} 条 · 总 ${(perf.totalMs / 1000).toFixed(1)}s · ` +
+        `首条候选 ${perf.firstCandidateMs ? (perf.firstCandidateMs / 1000).toFixed(1) + 's' : '—'} · ` +
+        `候选 ${perf.initialCandidates}+${perf.refillGenerated} · 补生成 ${perf.refillRounds} 轮 · ` +
+        `input ${perf.usage.input} / output ${perf.usage.output}（推理 ${perf.usage.reasoning}）`,
+    );
+  } catch (error) {
+    console.error(`[流式生成] 失败：${error.message}`);
+    perf.totalMs = Date.now() - startedAt;
+    send('error', { message: error.message || '生成失败', perf, partial: perf.candidatesTotal });
+  } finally {
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  }
+}
+
 async function handleValidate(res, body) {
   const factCard = body.factCard || {};
   const comments = Array.isArray(body.comments) ? body.comments : [];
@@ -926,6 +1185,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (pathname === '/api/comments' && req.method === 'POST') {
       await handleComments(res, await readJsonBody(req));
+      return;
+    }
+    if (pathname === '/api/comments/stream' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      await handleCommentsStream(req, res, body);
       return;
     }
     if (pathname === '/api/comments/regenerate' && req.method === 'POST') {

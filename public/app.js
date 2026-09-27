@@ -42,6 +42,13 @@ const state = {
     banned: [],
   },
   history: [],
+  streaming: false,
+  streamAbort: null,
+  streamTotal: 0,
+  streamDone: 0,
+  streamCandidates: [],
+  streamGotAnyCandidate: false,
+  streamGotFinal: false,
 };
 
 /* --------------------------------------------------------- *
@@ -796,6 +803,17 @@ function renderReport() {
   if (report.preferenceNote) {
     lines.push(`本次生效的评论策略：${String(report.preferenceNote).replace(/\n/g, ' ')}`);
   }
+  if (report.perf) {
+    const perf = report.perf;
+    const sec = (ms) => (ms === null || ms === undefined ? '—' : `${(ms / 1000).toFixed(1)}s`);
+    lines.push('');
+    lines.push(
+      `性能：总耗时 ${sec(perf.totalMs)}　首条完整候选 ${sec(perf.firstCandidateMs)}　首轮候选 ${perf.initialCandidates} 条 → 合格 ${perf.validAfterFilter} 条　补生成 ${perf.refillRounds} 轮（${perf.refillGenerated} 条）`,
+    );
+    lines.push(
+      `token：input ${perf.usage?.input ?? '—'}　output ${perf.usage?.output ?? '—'}（推理 ${perf.usage?.reasoning ?? '—'} · 正文 ${perf.tokenTokens ?? Math.max(0, (perf.usage?.output || 0) - (perf.usage?.reasoning || 0))}）`,
+    );
+  }
   if (report.focusOveruse?.length) {
     lines.push(`同一卖点条数偏多（事实较少时属正常）：${report.focusOveruse.map((f) => `${f.focus}×${f.times}`).join('、')}`);
   }
@@ -985,32 +1003,204 @@ async function generateComments() {
   if (!state.factCard) return toast('请先识别并核对事实卡', { bad: true });
   if (!$('#confirm-facts').checked) return toast('请先在「事实卡复核」里勾选核对确认', { bad: true });
   const count = currentCount();
-  busy(true, `正在生成 ${count} 条候选评论…`, '先生成候选，再做事实、正面与去重筛选');
-  try {
-    const data = await api('/api/comments', {
-      body: { factCard: state.factCard, count, options: state.options },
-    });
-    state.comments = (data.comments || []).map((item) => ({ ...item }));
-    state.report = data.report;
-    state.generation = {
-      model: data.model,
-      generatedAt: data.generatedAt,
-      productName: state.factCard.产品名称 || state.productName,
-    };
-    renderComments();
-    renderReport();
-    saveHistory();
-    persist();
-    if (state.comments.length < count) {
-      toast(`本次只产出 ${state.comments.length}/${count} 条合规评论，可看自检报告`, { bad: true });
-    } else {
-      toast(`已生成 ${state.comments.length} 条模拟评论`);
-    }
-  } catch (error) {
-    toast(error.message, { bad: true });
-  } finally {
-    busy(false);
+  if (state.streaming) {
+    // 用户连点或中途重新生成：先中断上一轮
+    state.streamAbort?.abort();
   }
+  const controller = new AbortController();
+  const token = (state.streamToken || 0) + 1;
+  state.streamToken = token;
+  state.streamAbort = controller;
+  state.streaming = true;
+  setGenerating(true);
+  resetStreamPanel();
+  try {
+    await streamGenerate(count, controller);
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      toast('已取消上一次生成');
+      return;
+    }
+    if (state.streamGotFinal) return;
+    // 流式链路本身失败（网络/代理不支持等）→ 回退到普通接口，不让用户白等
+    if (!state.streamGotAnyCandidate) {
+      try {
+        const data = await api('/api/comments', { body: { factCard: state.factCard, count, options: state.options } });
+        applyGenerationResult(data);
+        toast('流式不可用，已用普通模式完成生成');
+        return;
+      } catch (fallbackError) {
+        toast(fallbackError.message, { bad: true });
+        return;
+      }
+    }
+    toast(`生成中断：${error.message}`, { bad: true });
+  } finally {
+    // 中途重新生成时，旧请求的收尾不能影响新一轮的界面状态
+    if (state.streamToken !== token) return;
+    state.streaming = false;
+    setGenerating(false);
+    hideStreamPanel();
+  }
+}
+
+function applyGenerationResult(data) {
+  state.comments = (data.comments || []).map((item) => ({ ...item }));
+  state.report = data.report;
+  state.generation = {
+    model: data.model,
+    generatedAt: data.generatedAt,
+    productName: state.factCard?.产品名称 || state.productName,
+  };
+  openMenuIndex = -1;
+  renderComments();
+  renderReport();
+  saveHistory();
+  persist();
+}
+
+function setGenerating(on) {
+  const button = $('#btn-generate');
+  const total = state.streamTotal || currentCount();
+  button.disabled = on;
+  button.textContent = on ? `生成中… ${state.streamDone || 0}/${total}` : `生成 ${currentCount()} 条评论`;
+  if (on) {
+    $('#stream-status').classList.remove('hidden');
+    $('#stream-status').textContent = `正在生成候选 0 / ${total}`;
+  } else {
+    $('#stream-status').classList.add('hidden');
+    updateCTA();
+  }
+}
+
+function resetStreamPanel() {
+  state.streamTotal = currentCount();
+  state.streamDone = 0;
+  state.streamGotAnyCandidate = false;
+  state.streamGotFinal = false;
+  state.streamCandidates = [];
+  const panel = $('#stream-panel');
+  panel.classList.remove('hidden');
+  $('#stream-text').textContent = '正在分析产品信息，准备生成候选…';
+  $('#stream-list').innerHTML = '';
+}
+
+function hideStreamPanel() {
+  $('#stream-panel').classList.add('hidden');
+  $('#stream-status').classList.add('hidden');
+}
+
+function setStreamStatus(text) {
+  $('#stream-text').textContent = text;
+}
+
+function renderStreamList() {
+  const list = $('#stream-list');
+  const items = state.streamCandidates;
+  list.innerHTML = '';
+  const show = items.slice(-3);
+  const hiddenCount = items.length - show.length;
+  show.forEach((item) => {
+    const li = document.createElement('li');
+    li.className = 'stream-item';
+    li.dataset.index = `${String(item.index).padStart(2, '0')}　`;
+    li.textContent = item.text;
+    list.appendChild(li);
+  });
+  if (hiddenCount > 0) {
+    const more = document.createElement('li');
+    more.className = 'stream-more';
+    more.textContent = `前面还有 ${hiddenCount} 条候选已完成（完整内容会在筛选后统一展示）`;
+    list.insertBefore(more, list.firstChild);
+  }
+}
+
+/** 真实流式接收：SSE 事件驱动，只接收完整候选 */
+async function streamGenerate(count, controller) {
+  const response = await fetch('/api/comments/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ factCard: state.factCard, count, options: state.options }),
+    signal: controller.signal,
+  });
+  if (!response.ok || !response.body) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`流式接口返回 ${response.status}${detail ? `：${detail.slice(0, 120)}` : ''}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let streamError = null;
+
+  const handleFrame = (frame) => {
+    const eventMatch = frame.match(/^event: (.+)$/m);
+    const dataMatch = frame.match(/^data: ([\s\S]+)$/m);
+    if (!eventMatch || !dataMatch) return;
+    const event = eventMatch[1].trim();
+    let data = {};
+    try {
+      data = JSON.parse(dataMatch[1]);
+    } catch {
+      return;
+    }
+
+    if (event === 'generation_start') {
+      state.streamTotal = data.candidates || count;
+      setStreamStatus(`正在生成候选 0 / ${state.streamTotal}（首轮 ${data.candidates} 条，不足只补缺口）`);
+      $('#stream-status').textContent = `正在生成候选 0 / ${state.streamTotal}`;
+      $('#btn-generate').textContent = `生成中… 0/${state.streamTotal}`;
+      return;
+    }
+    if (event === 'candidate_complete') {
+      state.streamGotAnyCandidate = true;
+      state.streamDone += 1;
+      state.streamCandidates.push({ index: data.index, text: data.text });
+      renderStreamList();
+      setStreamStatus(`已生成候选 ${state.streamDone} / ${state.streamTotal}，正在继续…`);
+      $('#stream-status').textContent = `正在生成候选 ${state.streamDone} / ${state.streamTotal}`;
+      $('#btn-generate').textContent = `生成中… ${state.streamDone}/${state.streamTotal}`;
+      return;
+    }
+    if (event === 'filtering') {
+      setStreamStatus(`候选已收齐（${data.candidates} 条），正在做事实、正面与去重筛选…`);
+      return;
+    }
+    if (event === 'refill_start') {
+      setStreamStatus(`合格评论还差 ${data.missing} 条，正在只补生成 ${data.generate} 条候选…`);
+      return;
+    }
+    if (event === 'final_reviews') {
+      state.streamGotFinal = true;
+      applyGenerationResult(data);
+      hideStreamPanel();
+      const total = data.comments?.length || 0;
+      toast(total < count ? `本次产出 ${total}/${count} 条合规评论，可看自检报告` : `已生成 ${total} 条模拟评论`, { bad: total < count });
+      return;
+    }
+    if (event === 'done') {
+      setStreamStatus(`完成：${data.count} 条 · 总耗时 ${(data.duration / 1000).toFixed(1)} 秒`);
+      return;
+    }
+    if (event === 'error') {
+      streamError = new Error(data.message || '生成失败');
+    }
+  };
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let index = buffer.indexOf('\n\n');
+    while (index >= 0) {
+      const frame = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      if (frame.trim() && !frame.trimStart().startsWith(':')) handleFrame(frame);
+      index = buffer.indexOf('\n\n');
+    }
+  }
+  if (streamError) throw streamError;
 }
 
 async function regenerateOne(index) {
