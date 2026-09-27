@@ -2,7 +2,7 @@
 
 /**
  * 调试脚本：看一眼模型在生成候选评论时到底返回了什么。
- * 用法： node scripts/debug-generate.js [maxTokens] [reasoningEffort]
+ * 用法： node scripts/debug-generate.js [maxTokens] [reasoningEffort] [candidateCount]
  */
 
 const { loadConfig } = require('../src/config');
@@ -27,8 +27,9 @@ const factCard = {
 async function main() {
   const maxTokens = Number.parseInt(process.argv[2], 10) || 16000;
   const reasoningEffort = process.argv[3] || '';
+  const candidateCount = Number.parseInt(process.argv[4], 10) || 18;
   const config = loadConfig();
-  const messages = candidateMessages({ factCard, count: 10, candidateCount: 18, extraNote: '' });
+  const messages = candidateMessages({ factCard, count: 10, candidateCount, extraNote: '' });
   const body = { model: config.model, messages, max_tokens: maxTokens, stream: false, temperature: config.temperature };
   if (reasoningEffort) body.reasoning_effort = reasoningEffort;
   const started = Date.now();
@@ -39,7 +40,7 @@ async function main() {
   });
   const text = await response.text();
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
-  console.log(`HTTP ${response.status} · ${elapsed}s · max_tokens=${maxTokens} · reasoning_effort=${reasoningEffort || '（未传）'}`);
+  console.log(`HTTP ${response.status} · ${elapsed}s · max_tokens=${maxTokens} · 候选=${candidateCount} · reasoning_effort=${reasoningEffort || '（未传）'}`);
   let json = null;
   try {
     json = JSON.parse(text);
@@ -54,6 +55,10 @@ async function main() {
         错误: json.error || null,
         finish_reason: choice?.finish_reason,
         usage: json.usage,
+        推理占比: json.usage?.completion_tokens
+          ? `${(((json.usage.completion_tokens_details?.reasoning_tokens || 0) / json.usage.completion_tokens) * 100).toFixed(1)}%`
+          : null,
+        输出速度: json.usage?.completion_tokens ? `${(json.usage.completion_tokens / Number(elapsed)).toFixed(0)} tokens/秒` : null,
         content_length: typeof choice?.message?.content === 'string' ? choice.message.content.length : null,
         reasoning_length: typeof choice?.message?.reasoning_content === 'string' ? choice.message.reasoning_content.length : null,
         content_head: typeof choice?.message?.content === 'string' ? choice.message.content.slice(0, 300) : null,
