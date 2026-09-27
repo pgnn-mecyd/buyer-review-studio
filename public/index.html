@@ -214,8 +214,15 @@
             <div class="result-actions">
               <button class="btn btn-ghost btn-sm" id="btn-regenerate-all" title="按当前策略重新生成一批">重新生成</button>
               <button class="btn btn-ghost btn-sm" id="btn-copy-all">全部复制</button>
-              <button class="btn btn-ghost btn-sm" id="btn-export-md">导出 Markdown</button>
-              <button class="btn btn-primary btn-sm" id="btn-export-xlsx">导出 Excel</button>
+              <div class="dropdown" id="export-dropdown">
+                <button class="btn btn-secondary btn-sm" id="btn-export" aria-haspopup="menu" aria-expanded="false">
+                  导出<span class="caret" aria-hidden="true">▾</span>
+                </button>
+                <div class="dropdown-menu hidden" id="export-menu" role="menu">
+                  <button type="button" role="menuitem" data-export="xlsx">导出 Excel（.xlsx）</button>
+                  <button type="button" role="menuitem" data-export="md">导出 Markdown（.md）</button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -234,7 +241,11 @@
             <ol class="review-list" id="review-list"></ol>
 
             <details class="report" id="report-box">
-              <summary>生成自检报告<span class="summary-hint" id="report-hint">程序自检，不等于独立盲测</span></summary>
+              <summary>
+                <span class="quality-title">质量检查</span>
+                <span class="summary-hint" id="report-hint">程序自检，不等于独立盲测</span>
+                <span class="chevron" aria-hidden="true">›</span>
+              </summary>
               <div id="report-body"></div>
             </details>
           </div>

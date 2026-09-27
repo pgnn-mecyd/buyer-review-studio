@@ -49,6 +49,9 @@ const state = {
   streamCandidates: [],
   streamGotAnyCandidate: false,
   streamGotFinal: false,
+  editingIndex: -1,
+  editDraft: '',
+  regeneratingIndex: -1,
 };
 
 /* --------------------------------------------------------- *
@@ -634,6 +637,13 @@ function charBadgeClass(chars) {
 
 let openMenuIndex = -1;
 
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
 function renderComments() {
   const list = $('#review-list');
   list.innerHTML = '';
@@ -642,118 +652,179 @@ function renderComments() {
   $('#result-count').textContent = `${comments.length} 条`;
 
   comments.forEach((item, index) => {
-    const li = document.createElement('li');
-    li.className = 'review-item';
-    if (openMenuIndex === index) li.classList.add('menu-open');
+    const card = el('li', 'review-card');
+    if (openMenuIndex === index) card.classList.add('menu-open');
+    const isRegenerating = state.regeneratingIndex === index;
+    if (isRegenerating) card.classList.add('is-loading');
 
-    const no = document.createElement('div');
-    no.className = 'review-no';
-    no.textContent = String(index + 1).padStart(2, '0');
-    li.appendChild(no);
-
-    const main = document.createElement('div');
-    main.className = 'review-main';
-
-    const textarea = document.createElement('textarea');
-    textarea.className = 'review-text';
-    textarea.value = item.text;
-    textarea.rows = 1;
-    textarea.addEventListener('input', () => {
-      item.text = textarea.value;
-      item.chars = countChars(textarea.value);
-      autoGrow(textarea);
-      refreshMeta();
-      persist();
-    });
-    main.appendChild(textarea);
-
-    const meta = document.createElement('div');
-    meta.className = 'review-meta';
-    const charsSpan = document.createElement('span');
-    const typeSpan = document.createElement('span');
-    const emotionSpan = document.createElement('span');
-    const actions = document.createElement('div');
-    actions.className = 'review-actions';
-
-    actions.appendChild(makeAction('复制', () => copyText(item.text, '已复制该条评论')));
-    actions.appendChild(makeAction('重新生成', () => regenerateOne(index)));
-    actions.appendChild(
+    // 头部：编号 + hover 快捷操作（复制/编辑）+ •••
+    const head = el('header', 'review-card-head');
+    head.appendChild(el('span', 'review-no', String(index + 1).padStart(2, '0')));
+    const headRight = el('div', 'review-head-right');
+    const quick = el('div', 'review-quick');
+    quick.append(
+      makeAction('复制', (event) => copyWithFeedback(event.currentTarget, item.text), 'quick-btn'),
+      makeAction('编辑', () => startEdit(index), 'quick-btn'),
+    );
+    headRight.appendChild(quick);
+    headRight.appendChild(
       makeAction('•••', (event) => {
         event.stopPropagation();
         openMenuIndex = openMenuIndex === index ? -1 : index;
         renderComments();
-      }, 'action-btn menu-trigger'),
+      }, 'icon-btn menu-trigger'),
     );
-    meta.append(charsSpan, dot(), typeSpan, dot(), emotionSpan, actions);
-    main.appendChild(meta);
+    head.appendChild(headRight);
+    card.appendChild(head);
 
+    if (isRegenerating) card.appendChild(el('div', 'review-loading', '正在重新生成这一条…'));
+
+    // 正文：展示态 / 编辑态
+    if (state.editingIndex === index) {
+      const editor = el('div', 'review-editor');
+      const textarea = el('textarea', 'review-text');
+      textarea.value = state.editDraft;
+      textarea.addEventListener('input', () => {
+        state.editDraft = textarea.value;
+        autoGrow(textarea);
+      });
+      textarea.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') cancelEdit();
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') saveEdit(index);
+      });
+      const actions = el('div', 'editor-actions');
+      actions.append(
+        makeAction('取消', () => cancelEdit(), 'btn btn-ghost btn-sm'),
+        makeAction('保存', () => saveEdit(index), 'btn btn-primary btn-sm'),
+      );
+      editor.append(textarea, actions);
+      card.appendChild(editor);
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        autoGrow(textarea);
+      });
+    } else {
+      const body = el('div', 'review-body');
+      body.appendChild(el('p', 'review-text-display', item.text));
+      card.appendChild(body);
+    }
+
+    // 元数据：字数（普通灰字）+ 类型 / 满意度（浅灰 chip）
+    const chars = countChars(item.text);
+    const meta = el('footer', 'review-meta');
+    meta.append(
+      el('span', `meta-chars ${charBadgeClass(chars)}`, `${chars} 字`),
+      el('span', 'chip-sm', typeOf(item)),
+      el('span', 'chip-sm', item.meta?.emotion || '明确满意'),
+    );
+    card.appendChild(meta);
+
+    // ••• 菜单：复制 / 编辑 / 重新生成这一条 / 删除（低频操作藏在菜单里）
     if (openMenuIndex === index) {
-      const menu = document.createElement('div');
-      menu.className = 'review-menu';
-      const edit = document.createElement('button');
-      edit.type = 'button';
-      edit.textContent = '编辑';
-      edit.addEventListener('click', () => {
-        openMenuIndex = -1;
-        renderComments();
-        const target = list.querySelectorAll('.review-text')[index];
-        target?.focus();
-      });
-      const copy = document.createElement('button');
-      copy.type = 'button';
-      copy.textContent = '复制';
-      copy.addEventListener('click', () => {
-        openMenuIndex = -1;
-        renderComments();
-        copyText(item.text, '已复制该条评论');
-      });
-      const regen = document.createElement('button');
-      regen.type = 'button';
-      regen.textContent = '重新生成';
-      regen.addEventListener('click', () => {
-        openMenuIndex = -1;
-        regenerateOne(index);
-      });
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.className = 'danger';
-      del.textContent = '删除';
-      del.addEventListener('click', () => {
-        openMenuIndex = -1;
-        deleteComment(index);
-      });
-      menu.append(edit, copy, regen, del);
-      main.appendChild(menu);
+      const menu = el('div', 'review-menu');
+      menu.append(
+        menuButton('复制', () => {
+          closeMenu();
+          copyText(item.text, '已复制该条评论');
+        }),
+        menuButton('编辑', () => {
+          closeMenu();
+          startEdit(index);
+        }),
+        menuButton('重新生成这一条', () => {
+          closeMenu();
+          regenerateOne(index);
+        }),
+      );
+      menu.appendChild(el('div', 'menu-sep'));
+      menu.appendChild(
+        menuButton('删除', () => {
+          closeMenu();
+          deleteComment(index);
+        }, 'danger'),
+      );
+      card.appendChild(menu);
     }
 
-    function refreshMeta() {
-      const chars = countChars(textarea.value);
-      charsSpan.textContent = `${chars} 字`;
-      charsSpan.className = `meta-chars ${charBadgeClass(chars)}`;
-      typeSpan.textContent = typeOf({ ...item, text: textarea.value });
-      emotionSpan.textContent = item.meta?.emotion || '明确满意';
-      autoGrow(textarea);
-    }
-
-    li.appendChild(main);
-    list.appendChild(li);
-    // 必须在插入 DOM 之后再量高度，否则 textarea 会裁掉第二行
-    refreshMeta();
-  });
-
-  requestAnimationFrame(() => {
-    list.querySelectorAll('.review-text').forEach(autoGrow);
+    list.appendChild(card);
   });
 }
 
-function dot() {
-  const span = document.createElement('span');
-  span.className = 'meta-dot';
-  span.textContent = '·';
-  return span;
+function menuButton(label, onClick, className = '') {
+  const button = el('button', className, label);
+  button.type = 'button';
+  button.addEventListener('click', onClick);
+  return button;
 }
 
-function makeAction(label, onClick, className = 'action-btn') {
+function closeMenu() {
+  openMenuIndex = -1;
+  renderComments();
+}
+
+function copyWithFeedback(button, text) {
+  copyText(text, '已复制该条评论');
+  if (!button) return;
+  const original = button.textContent;
+  button.textContent = '已复制';
+  setTimeout(() => {
+    button.textContent = original;
+  }, 1200);
+}
+
+/* ---------------- 单条内联编辑 ---------------- */
+
+function startEdit(index) {
+  if (state.regeneratingIndex === index) {
+    toast('这一条正在重新生成，稍等再编辑', { bad: true });
+    return;
+  }
+  state.editingIndex = index;
+  state.editDraft = state.comments[index]?.text || '';
+  openMenuIndex = -1;
+  renderComments();
+}
+
+function cancelEdit() {
+  state.editingIndex = -1;
+  state.editDraft = '';
+  renderComments();
+}
+
+function saveEdit(index) {
+  const value = String(state.editDraft || '').trim();
+  if (!value) {
+    toast('评论内容不能为空', { bad: true });
+    return;
+  }
+  const item = state.comments[index];
+  if (!item) return;
+  item.text = value;
+  item.chars = countChars(value);
+  state.editingIndex = -1;
+  state.editDraft = '';
+  renderComments();
+  persist();
+  touchHistorySnapshot();
+  toast('已保存这一条，复制与导出都会用新内容');
+}
+
+/** 让最新一条历史记录与当前编辑结果保持一致，避免"历史里还是旧文案" */
+function touchHistorySnapshot() {
+  const latest = state.history[0];
+  if (!latest) return;
+  const sameRun =
+    !latest.generation?.generatedAt ||
+    !state.generation.generatedAt ||
+    latest.generation.generatedAt === state.generation.generatedAt;
+  if (!sameRun) return;
+  latest.comments = state.comments.map((entry) => ({ ...entry }));
+  renderHistory();
+  persist();
+}
+
+function makeAction(label, onClick, className = 'quick-btn') {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = className;
@@ -765,14 +836,23 @@ function makeAction(label, onClick, className = 'action-btn') {
 function deleteComment(index) {
   const removed = state.comments[index];
   state.comments.splice(index, 1);
+  if (state.editingIndex === index) {
+    state.editingIndex = -1;
+    state.editDraft = '';
+  } else if (state.editingIndex > index) {
+    state.editingIndex -= 1;
+  }
+  openMenuIndex = -1;
   renderComments();
   persist();
+  touchHistorySnapshot();
   toast(`已删除第 ${index + 1} 条评论`, {
     actionLabel: '撤销',
     onAction: () => {
       state.comments.splice(index, 0, removed);
       renderComments();
       persist();
+      touchHistorySnapshot();
       toast('已恢复');
     },
   });
@@ -792,6 +872,12 @@ function renderReport() {
     return;
   }
   $('#report-box').classList.remove('hidden');
+  // 折叠状态下的摘要：通过条数 · 淘汰候选 · 需人工复核
+  $('#report-hint').textContent = [
+    `${report.selected} 条通过`,
+    `淘汰 ${report.rejectedCount} 条候选`,
+    report.warnings?.length ? `需复核 ${report.warnings.length} 项` : '无需人工复核',
+  ].join(' · ');
   const lines = [
     `模型：${report.model || '未记录'}　生成时间：${report.generatedAt || ''}　耗时：${(report.elapsedMs / 1000).toFixed(1)} 秒`,
     `候选 ${report.candidateCount} 条 → 通过事实与正面检查 ${report.passed} 条 → 语义去重后保留 ${report.selected} 条`,
@@ -828,7 +914,6 @@ function renderReport() {
     html.push('</ul></details>');
   }
   body.innerHTML = html.join('');
-  $('#report-hint').textContent = `候选 ${report.candidateCount} 条 · 自检不等于盲测`;
 }
 
 /* --------------------------------------------------------- *
@@ -1053,6 +1138,9 @@ function applyGenerationResult(data) {
     productName: state.factCard?.产品名称 || state.productName,
   };
   openMenuIndex = -1;
+  state.editingIndex = -1;
+  state.editDraft = '';
+  state.regeneratingIndex = -1;
   renderComments();
   renderReport();
   saveHistory();
@@ -1206,10 +1294,20 @@ async function streamGenerate(count, controller) {
 async function regenerateOne(index) {
   const current = state.comments[index];
   if (!state.factCard || !current) return;
+  // 并发保护：同一条被连续点击时直接忽略，其他卡片不受影响
+  if (state.regeneratingIndex === index) return;
+  // 正在编辑这一条时先阻止，避免未保存的草稿被覆盖
+  if (state.editingIndex === index) {
+    toast('请先保存或取消这一条的编辑，再重新生成', { bad: true });
+    return;
+  }
+  state.regeneratingIndex = index;
   const others = state.comments.filter((_, i) => i !== index);
   const chars = countChars(current.text);
   const targetLength = chars >= 88 ? '90–110 字（高度赞扬长评，全正面）' : chars >= 50 ? '55–85 字' : '20–50 字（短评）';
-  busy(true, `正在重新生成第 ${index + 1} 条…`, '只重写这一条，其余不动');
+  openMenuIndex = -1;
+  state.editingIndex = -1;
+  renderComments();
   try {
     const data = await api('/api/comments/regenerate', {
       body: {
@@ -1223,18 +1321,20 @@ async function regenerateOne(index) {
       },
     });
     state.comments[index] = data.comment;
-    openMenuIndex = -1;
     renderComments();
     persist();
+    touchHistorySnapshot();
     if (data.warnings?.length) {
       toast(`已重新生成，需复核：${data.warnings.map((w) => w.type).join('、')}`, { bad: true });
     } else {
       toast('已重新生成这一条');
     }
   } catch (error) {
-    toast(error.message, { bad: true });
+    // 失败时保留原评论，只给一条轻提示
+    toast(`这一条没换成：${error.message}`, { bad: true });
   } finally {
-    busy(false);
+    state.regeneratingIndex = -1;
+    renderComments();
   }
 }
 
@@ -1643,8 +1743,27 @@ function bindEvents() {
     if (!state.comments.length) return toast('还没有可复制的评论', { bad: true });
     copyText(state.comments.map((item, index) => `${index + 1}. ${item.text}`).join('\n\n'), '已复制全部评论');
   });
-  $('#btn-export-md').addEventListener('click', exportMarkdown);
-  $('#btn-export-xlsx').addEventListener('click', exportExcel);
+  // 导出下拉：Excel / Markdown 收进同一个入口
+  $('#btn-export').addEventListener('click', (event) => {
+    event.stopPropagation();
+    const menu = $('#export-menu');
+    menu.classList.toggle('hidden');
+    $('#btn-export').setAttribute('aria-expanded', String(!menu.classList.contains('hidden')));
+  });
+  $('#export-menu').addEventListener('click', (event) => {
+    const item = event.target.closest('button[data-export]');
+    if (!item) return;
+    $('#export-menu').classList.add('hidden');
+    $('#btn-export').setAttribute('aria-expanded', 'false');
+    if (item.dataset.export === 'xlsx') exportExcel();
+    else exportMarkdown();
+  });
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('#export-dropdown')) return;
+    if ($('#export-menu').classList.contains('hidden')) return;
+    $('#export-menu').classList.add('hidden');
+    $('#btn-export').setAttribute('aria-expanded', 'false');
+  });
   document.addEventListener('click', (event) => {
     if (openMenuIndex < 0) return;
     if (!event.target.closest('.review-menu') && !event.target.closest('.menu-trigger')) {
