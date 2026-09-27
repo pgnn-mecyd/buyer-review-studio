@@ -50,14 +50,15 @@
               <input id="file-input" type="file" accept="image/*" multiple hidden />
             </div>
 
-            <div class="field">
-              <label for="product-name">产品名称</label>
-              <input id="product-name" class="input-plain" type="text" placeholder="点击填写产品名称" autocomplete="off" />
-            </div>
-
-            <div class="field">
-              <label for="product-spec">产品规格</label>
-              <input id="product-spec" class="input-plain" type="text" placeholder="例如 100ml / 30 片 / 均码" autocomplete="off" />
+            <div class="field-pair">
+              <div class="field">
+                <label for="product-name">产品名称</label>
+                <input id="product-name" class="input-plain" type="text" placeholder="点击填写" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="product-spec">产品规格</label>
+                <input id="product-spec" class="input-plain" type="text" placeholder="100ml / 30 片" autocomplete="off" />
+              </div>
             </div>
 
             <div class="field">
@@ -78,7 +79,10 @@
             <details class="section-toggle" id="facts-toggle">
               <summary class="card-head as-summary">
                 <h2>事实卡复核</h2>
-                <span class="card-hint" id="facts-summary">尚未生成</span>
+                <span class="summary-tail">
+                  <span class="card-hint" id="facts-summary">尚未生成</span>
+                  <span class="chevron" aria-hidden="true">›</span>
+                </span>
               </summary>
               <div class="toggle-body">
                 <div id="facts-empty" class="empty">填写产品信息后，点上方按钮识别并生成事实卡。</div>
@@ -106,68 +110,67 @@
           <section class="card" id="card-strategy">
             <header class="card-head">
               <h2>评论策略</h2>
+              <span class="card-hint">高频设置</span>
             </header>
 
-            <div class="strategy-row">
-              <div class="strategy-label">
-                <span>评论数量</span>
-                <span class="label-note">1–20 条</span>
-              </div>
-              <div class="stepper">
+            <div class="setting-row">
+              <span class="setting-label">评论数量</span>
+              <div class="stepper stepper-sm">
                 <button type="button" class="stepper-btn" id="count-minus" aria-label="减少">−</button>
                 <input id="comment-count" type="number" min="1" max="20" value="10" />
                 <button type="button" class="stepper-btn" id="count-plus" aria-label="增加">+</button>
               </div>
             </div>
 
-            <div class="strategy-row column">
-              <div class="strategy-label">
-                <span>评论效果强度</span>
+            <div class="setting-block">
+              <div class="setting-row as-block-head">
+                <span class="setting-label">评论强度</span>
                 <span class="strength-value" id="strength-value">8.0</span>
               </div>
               <input id="strength" class="range" type="range" min="6.5" max="8.5" step="0.1" value="8" />
-              <div class="range-scale"><span>克制 6.5</span><span>规则默认 7.5–8</span><span>热情 8.5</span></div>
+              <div class="range-scale"><span>6.5 克制</span><span>7.5–8 规则默认</span><span>8.5 热情</span></div>
               <p class="foot-note hidden" id="strength-note">已高于规则默认区间：只会让肯定更明确、更具体，不会放宽事实边界。</p>
             </div>
 
-            <div class="strategy-grid">
-              <div class="field">
-                <label for="style">评论风格</label>
-                <select id="style">
-                  <option value="真实买家感">真实买家感</option>
-                  <option value="以平静肯定为主">以平静肯定为主</option>
-                  <option value="以强烈满意为主">以强烈满意为主</option>
-                  <option value="以短直球为主">以短直球为主</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="length-mode">评论长度</label>
-                <select id="length-mode">
-                  <option value="自动">自动（按规则）</option>
-                  <option value="偏短">偏短</option>
-                  <option value="偏长">偏长</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="language">生成语言</label>
-                <select id="language">
-                  <option value="中文">中文</option>
-                </select>
-              </div>
+            <div class="setting-row">
+              <span class="setting-label">评论长度</span>
+              <select class="select-inline" id="length-mode">
+                <option value="自动">自动</option>
+                <option value="偏短">偏短</option>
+                <option value="偏长">偏长</option>
+              </select>
+            </div>
+
+            <div class="setting-row">
+              <span class="setting-label">评论风格</span>
+              <select class="select-inline" id="style">
+                <option value="真实买家感">真人买家感</option>
+                <option value="以平静肯定为主">平静肯定为主</option>
+                <option value="以强烈满意为主">强烈满意为主</option>
+                <option value="以短直球为主">短直球为主</option>
+              </select>
             </div>
 
             <details class="accordion" id="advanced">
               <summary>
                 <span>高级设置</span>
-                <span class="summary-hint" id="advanced-hint">表达结构 · 使用场景 · 功效关键词 · 禁用表达</span>
+                <span class="summary-hint" id="advanced-hint">低频参数</span>
+                <span class="chevron" aria-hidden="true">›</span>
               </summary>
               <div class="accordion-body">
+                <div class="setting-row">
+                  <span class="setting-label">生成语言</span>
+                  <select class="select-inline" id="language">
+                    <option value="中文">中文</option>
+                  </select>
+                </div>
+
                 <div class="field">
-                  <label>表达结构<span class="label-note">评论可以采用的句式结构，至少保留 1 项</span></label>
+                  <label>表达结构<span class="label-note">至少保留 1 项</span></label>
                   <div class="tags" id="tags-structure"></div>
                 </div>
                 <div class="field">
-                  <label>使用场景<span class="label-note">来自事实卡；没有资料支持的场景不会写进评论</span></label>
+                  <label>使用场景<span class="label-note">来自事实卡</span></label>
                   <div class="tags" id="tags-scene"></div>
                 </div>
                 <div class="field">
@@ -179,22 +182,22 @@
                   <div class="tags" id="tags-banned"></div>
                 </div>
                 <div class="field">
-                  <label>事实卡禁止项<span class="label-note">由事实卡「不得写的内容」生成，只读</span></label>
+                  <label>事实卡禁止项<span class="label-note">只读</span></label>
                   <div class="chips chips-muted" id="chips-forbidden"></div>
                 </div>
                 <div class="meta-line">
                   <span>长度分布</span>
-                  <span class="meta-value">自适应：主体 55–85 字 · 1–2 条约 100 字长评 · 少量短评</span>
+                  <span class="meta-value">自适应：55–85 字为主 · 1–2 条约 100 字 · 少量短评</span>
                 </div>
+                <p class="foot-note prompt-hint">
+                  <button type="button" class="btn-link" id="btn-prompt-inline">查看本次提示词与规则原文</button>
+                </p>
               </div>
             </details>
-
-            <p class="foot-note">
-              想确认模型到底收到什么？<button type="button" class="btn-link" id="btn-prompt-inline">查看本次提示词与规则原文</button>
-            </p>
           </section>
 
           <div class="sticky-cta">
+            <div class="cta-summary" id="cta-summary">10 条 · 强度 8.0 · 真人买家感</div>
             <button class="btn btn-primary btn-lg" id="btn-generate" disabled>生成 10 条评论</button>
             <p class="cta-hint" id="generate-hint">生成前请先核对事实卡</p>
           </div>

@@ -596,14 +596,15 @@ function updateCTA() {
   const count = currentCount();
   const button = $('#btn-generate');
   button.textContent = `生成 ${count} 条评论`;
+  $('#cta-summary').textContent = `${count} 条 · 强度 ${Number(state.options.strength).toFixed(1)} · ${state.options.style}`;
   const hasCard = Boolean(state.factCard);
   const confirmed = $('#confirm-facts').checked;
   button.disabled = !(hasCard && confirmed);
   $('#generate-hint').textContent = !hasCard
-    ? '生成前请先识别并核对事实卡'
+    ? '先识别并核对事实卡'
     : confirmed
-      ? '按规则先生成候选，再做事实、正面与去重筛选 · Ctrl + Enter 快捷生成'
-      : '请先在「事实卡复核」里勾选核对确认';
+      ? '先生成候选，再按规则筛选 · Ctrl + Enter'
+      : '请在「事实卡复核」里勾选确认';
 }
 
 /* --------------------------------------------------------- *
@@ -1429,6 +1430,7 @@ function bindEvents() {
   });
   $('#style').addEventListener('change', (event) => {
     state.options.style = event.target.value;
+    updateCTA();
     persist();
   });
   $('#length-mode').addEventListener('change', (event) => {
