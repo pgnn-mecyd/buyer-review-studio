@@ -1,0 +1,14 @@
+{
+  "_说明": "把这个文件复制为 config.json 并填写；也可以在网页右上角「模型设置」里填写，网页会写入 config.json。网页不会把密钥返回给浏览器。",
+  "baseUrl": "https://api.deepseek.com",
+  "apiKey": "你的密钥",
+  "model": "deepseek-flash",
+  "vision": "auto",
+  "temperature": 0.95,
+  "maxTokens": 32000,
+  "ocr": {
+    "baseUrl": "",
+    "apiKey": "",
+    "model": ""
+  }
+}

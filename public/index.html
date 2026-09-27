@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>买家评论生成工具（AI 模拟文案 · 本地运行）</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1>买家评论生成工具</h1>
+        <span class="pill pill-warn">AI 生成的模拟评论</span>
+        <span class="pill" id="rules-pill">规则蓝本 v0.4.3</span>
+      </div>
+      <div class="topbar-right">
+        <span class="model-status" id="model-status">正在读取模型配置…</span>
+        <button class="btn btn-ghost" id="btn-open-settings">模型设置</button>
+      </div>
+    </header>
+
+    <div class="disclaimer">
+      本工具输出的是 <strong>AI 生成的模拟评论文案</strong>，用于文案测试与素材准备，不代表任何真实顾客的反馈，
+      也不得作为真实消费者评价发布或对外表述。请在导出与使用前自行核对事实与合规要求。
+    </div>
+
+    <main class="layout">
+      <section class="card">
+        <div class="card-head">
+          <h2><span class="step">1</span>产品资料</h2>
+          <span class="hint">文字与图片可以同时使用；图片会由服务端模型识读。</span>
+        </div>
+
+        <div class="field">
+          <label for="product-name">产品名称</label>
+          <input id="product-name" type="text" placeholder="例如：沁润修护精华水 100ml" autocomplete="off" />
+        </div>
+
+        <div class="field">
+          <label for="selling-points">卖点 / 已知信息（一行一条，可粘贴详情页文案）</label>
+          <textarea id="selling-points" rows="6" placeholder="例如：&#10;透明质酸钠配方，质地清爽&#10;净含量 100ml&#10;泵头按压取用"></textarea>
+        </div>
+
+        <div class="field">
+          <label>产品包装图 / 详情图（可多张，支持拖拽）</label>
+          <div class="dropzone" id="dropzone">
+            <input id="file-input" type="file" accept="image/*" multiple hidden />
+            <p>把图片拖到这里，或 <button type="button" class="btn btn-link" id="btn-choose-file">选择图片</button></p>
+            <p class="hint">建议使用能看清包装文字的清晰图片；单张建议小于 6MB。</p>
+          </div>
+          <div class="thumbs" id="thumbs"></div>
+        </div>
+
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-extract">识别并生成产品事实卡</button>
+          <span class="hint" id="extract-hint"></span>
+        </div>
+      </section>
+
+      <section class="card" id="card-facts">
+        <div class="card-head">
+          <h2><span class="step">2</span>产品事实卡（可编辑）</h2>
+          <span class="hint">识别不清的内容放在「待确认」，不会写进评论。</span>
+        </div>
+        <div id="facts-empty" class="empty">还没有事实卡。请先填写资料并点击「识别并生成产品事实卡」。</div>
+        <div id="facts-editor" class="hidden">
+          <div class="fact-meta">
+            <div class="field">
+              <label>产品名称</label>
+              <input id="fact-name" type="text" />
+            </div>
+            <div class="field">
+              <label>品类</label>
+              <input id="fact-category" type="text" />
+            </div>
+          </div>
+          <div id="fact-sections"></div>
+          <div class="extract-note" id="extract-note"></div>
+          <label class="checkline">
+            <input type="checkbox" id="confirm-facts" />
+            我已核对以上事实卡：确认写进评论的信息都真实存在，待确认的信息不参与生成。
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2><span class="step">3</span>生成模拟评论</h2>
+          <span class="hint">默认 10 条，A 组风格，全部正面，7.5–8 表达力度。</span>
+        </div>
+        <div class="actions">
+          <label class="inline-field">
+            条数
+            <input id="comment-count" type="number" min="1" max="20" value="10" />
+          </label>
+          <button class="btn btn-primary" id="btn-generate" disabled>生成模拟评论</button>
+          <span class="hint" id="generate-hint">生成前请先核对事实卡。</span>
+        </div>
+      </section>
+
+      <section class="card" id="card-results">
+        <div class="card-head">
+          <h2><span class="step">4</span>评论结果</h2>
+          <div class="result-tools">
+            <label class="checkline small">
+              <input type="checkbox" id="toggle-diagnostics" />
+              显示生成诊断
+            </label>
+            <button class="btn btn-ghost" id="btn-copy-all">复制全部</button>
+            <button class="btn btn-ghost" id="btn-export-md">导出 Markdown</button>
+            <button class="btn btn-ghost" id="btn-export-xlsx">导出 Excel</button>
+          </div>
+        </div>
+        <div id="results-empty" class="empty">还没有生成评论。</div>
+        <ol class="comment-list" id="comment-list"></ol>
+        <details class="report" id="report-box">
+          <summary>生成自检报告（程序自检，不等于独立盲测）</summary>
+          <div id="report-body"></div>
+        </details>
+      </section>
+    </main>
+
+    <div class="modal hidden" id="settings-modal">
+      <div class="modal-panel">
+        <div class="modal-head">
+          <h2>模型设置</h2>
+          <button class="btn btn-ghost" id="btn-close-settings">关闭</button>
+        </div>
+        <p class="hint" id="config-source"></p>
+        <div class="field">
+          <label for="cfg-base-url">接口地址（OpenAI 兼容，末尾无需 /v1）</label>
+          <input id="cfg-base-url" type="text" placeholder="https://api.deepseek.com" />
+        </div>
+        <div class="field">
+          <label for="cfg-model">模型 ID（请用接口真实 ID，不要按显示名猜）</label>
+          <div class="row">
+            <input id="cfg-model" type="text" list="model-options" placeholder="deepseek-flash" />
+            <button class="btn btn-ghost" id="btn-load-models">读取可用模型</button>
+          </div>
+          <datalist id="model-options"></datalist>
+        </div>
+        <div class="field">
+          <label for="cfg-api-key">密钥（只保存在服务端 config.json，不会回传到网页）</label>
+          <input id="cfg-api-key" type="password" placeholder="留空表示保持现有密钥不变" autocomplete="off" />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="cfg-vision">图片识读方式</label>
+            <select id="cfg-vision">
+              <option value="auto">自动（优先模型读图，失败回退本地 OCR）</option>
+              <option value="on">只用模型读图（不支持时报错）</option>
+              <option value="off">只用本地 OCR + 文本模型整理</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="cfg-temperature">写作温度</label>
+            <input id="cfg-temperature" type="number" step="0.05" min="0" max="2" value="0.95" />
+          </div>
+          <div class="field">
+            <label for="cfg-max-tokens">单次输出上限（tokens，推理型模型建议 32000 起）</label>
+            <input id="cfg-max-tokens" type="number" step="1000" min="8000" max="200000" value="32000" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="cfg-ocr-url">外部 OCR / 视觉接口地址（可选）</label>
+            <input id="cfg-ocr-url" type="text" placeholder="留空则回退 Windows 本地 OCR" />
+          </div>
+          <div class="field">
+            <label for="cfg-ocr-model">外部 OCR 模型 ID（可选）</label>
+            <input id="cfg-ocr-model" type="text" placeholder="例如 qwen-vl-max" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="cfg-ocr-key">外部 OCR 接口密钥（可选，留空保持）</label>
+          <input id="cfg-ocr-key" type="password" autocomplete="off" />
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-save-config">保存设置</button>
+          <button class="btn btn-ghost" id="btn-test-config">测试连接</button>
+          <span class="hint" id="settings-status"></span>
+        </div>
+        <pre class="test-output hidden" id="test-output"></pre>
+      </div>
+    </div>
+
+    <div class="overlay hidden" id="busy">
+      <div class="busy-box">
+        <div class="spinner"></div>
+        <p id="busy-text">处理中…</p>
+        <p class="hint" id="busy-sub"></p>
+      </div>
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

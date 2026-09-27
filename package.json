@@ -1,0 +1,18 @@
+{
+  "name": "buyer-review-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "本地运行的模拟买家评论生成工具（依据《买家评论生成规则 v0.4.3》）",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "smoke": "node scripts/smoke-test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}
