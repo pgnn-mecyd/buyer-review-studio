@@ -3,130 +3,238 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>买家评论生成工具（AI 模拟文案 · 本地运行）</title>
+    <title>买家评论生成器 · AI 模拟文案</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div class="topbar-left">
-        <h1>买家评论生成工具</h1>
-        <span class="pill pill-warn">AI 生成的模拟评论</span>
-        <span class="pill" id="rules-pill">规则蓝本 v0.4.3</span>
+    <header class="topnav">
+      <div class="topnav-left">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">评论生成器</span>
+        <span class="pill">AI 模拟评论</span>
+        <span class="pill pill-quiet" id="rules-pill">规则 v0.4.3</span>
       </div>
-      <div class="topbar-right">
-        <span class="model-status" id="model-status">正在读取模型配置…</span>
-        <button class="btn btn-ghost" id="btn-open-settings">模型设置</button>
+      <div class="topnav-right">
+        <span class="model-status" id="model-status"><span class="dot"></span>正在读取配置…</span>
+        <button class="btn btn-ghost btn-sm" id="btn-history">历史记录</button>
+        <button class="btn btn-ghost btn-sm" id="btn-open-settings">设置</button>
       </div>
     </header>
 
-    <div class="disclaimer">
-      本工具输出的是 <strong>AI 生成的模拟评论文案</strong>，用于文案测试与素材准备，不代表任何真实顾客的反馈，
-      也不得作为真实消费者评价发布或对外表述。请在导出与使用前自行核对事实与合规要求。
-    </div>
-
-    <main class="layout">
-      <section class="card">
-        <div class="card-head">
-          <h2><span class="step">1</span>产品资料</h2>
-          <span class="hint">文字与图片可以同时使用；图片会由服务端模型识读。</span>
+    <main class="page">
+      <div class="page-head">
+        <h1>买家评论生成器</h1>
+        <p class="page-sub">根据产品卖点与评论策略，生成自然、真实的买家评论。</p>
+        <div class="info-strip">
+          <span class="info-icon" aria-hidden="true">ⓘ</span>
+          <span>输出的全部内容是 <strong>AI 生成的模拟评论文案</strong>，不代表真实顾客反馈，不得作为真实消费者评价对外发布。</span>
         </div>
+      </div>
 
-        <div class="field">
-          <label for="product-name">产品名称</label>
-          <input id="product-name" type="text" placeholder="例如：沁润修护精华水 100ml" autocomplete="off" />
-        </div>
+      <div class="workspace">
+        <!-- ============ 左侧：配置 ============ -->
+        <aside class="config-panel">
+          <section class="card" id="card-product">
+            <header class="card-head">
+              <h2>产品信息</h2>
+              <span class="card-hint" id="product-hint"></span>
+            </header>
 
-        <div class="field">
-          <label for="selling-points">卖点 / 已知信息（一行一条，可粘贴详情页文案）</label>
-          <textarea id="selling-points" rows="6" placeholder="例如：&#10;透明质酸钠配方，质地清爽&#10;净含量 100ml&#10;泵头按压取用"></textarea>
-        </div>
-
-        <div class="field">
-          <label>产品包装图 / 详情图（可多张，支持拖拽）</label>
-          <div class="dropzone" id="dropzone">
-            <input id="file-input" type="file" accept="image/*" multiple hidden />
-            <p>把图片拖到这里，或 <button type="button" class="btn btn-link" id="btn-choose-file">选择图片</button></p>
-            <p class="hint">建议使用能看清包装文字的清晰图片；单张建议小于 6MB。</p>
-          </div>
-          <div class="thumbs" id="thumbs"></div>
-        </div>
-
-        <div class="actions">
-          <button class="btn btn-primary" id="btn-extract">识别并生成产品事实卡</button>
-          <span class="hint" id="extract-hint"></span>
-        </div>
-      </section>
-
-      <section class="card" id="card-facts">
-        <div class="card-head">
-          <h2><span class="step">2</span>产品事实卡（可编辑）</h2>
-          <span class="hint">识别不清的内容放在「待确认」，不会写进评论。</span>
-        </div>
-        <div id="facts-empty" class="empty">还没有事实卡。请先填写资料并点击「识别并生成产品事实卡」。</div>
-        <div id="facts-editor" class="hidden">
-          <div class="fact-meta">
-            <div class="field">
-              <label>产品名称</label>
-              <input id="fact-name" type="text" />
+            <div class="product-media">
+              <div class="thumbs" id="thumbs"></div>
+              <button class="media-add" id="btn-choose-file" type="button">
+                <span class="media-add-icon">＋</span>
+                <span id="media-add-label">添加产品图</span>
+              </button>
+              <input id="file-input" type="file" accept="image/*" multiple hidden />
             </div>
+
             <div class="field">
-              <label>品类</label>
-              <input id="fact-category" type="text" />
+              <label for="product-name">产品名称</label>
+              <input id="product-name" class="input-plain" type="text" placeholder="点击填写产品名称" autocomplete="off" />
+            </div>
+
+            <div class="field">
+              <label for="product-spec">产品规格</label>
+              <input id="product-spec" class="input-plain" type="text" placeholder="例如 100ml / 30 片 / 均码" autocomplete="off" />
+            </div>
+
+            <div class="field">
+              <label>核心卖点</label>
+              <div class="tags" id="tags-selling"></div>
+            </div>
+
+            <div class="field">
+              <label>产品功效<span class="label-note">未确认的功效不会写进评论</span></label>
+              <div class="tags" id="tags-efficacy"></div>
+            </div>
+
+            <button class="btn btn-secondary btn-block" id="btn-extract">识别图片 · 生成事实卡</button>
+            <p class="foot-note" id="extract-note">文字与图片可以同时使用；也可以只用其中一种。</p>
+          </section>
+
+          <section class="card" id="card-facts">
+            <details class="section-toggle" id="facts-toggle">
+              <summary class="card-head as-summary">
+                <h2>事实卡复核</h2>
+                <span class="card-hint" id="facts-summary">尚未生成</span>
+              </summary>
+              <div class="toggle-body">
+                <div id="facts-empty" class="empty">填写产品信息后，点上方按钮识别并生成事实卡。</div>
+                <div id="facts-editor" class="hidden">
+                  <div class="fact-meta">
+                    <div class="field">
+                      <label for="fact-name">产品名称</label>
+                      <input id="fact-name" type="text" />
+                    </div>
+                    <div class="field">
+                      <label for="fact-category">品类</label>
+                      <input id="fact-category" type="text" />
+                    </div>
+                  </div>
+                  <div id="fact-sections"></div>
+                  <label class="checkline">
+                    <input type="checkbox" id="confirm-facts" />
+                    <span>我已核对事实卡：写进评论的信息都真实存在，待确认的内容不参与生成。</span>
+                  </label>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <section class="card" id="card-strategy">
+            <header class="card-head">
+              <h2>评论策略</h2>
+            </header>
+
+            <div class="strategy-row">
+              <div class="strategy-label">
+                <span>评论数量</span>
+                <span class="label-note">1–20 条</span>
+              </div>
+              <div class="stepper">
+                <button type="button" class="stepper-btn" id="count-minus" aria-label="减少">−</button>
+                <input id="comment-count" type="number" min="1" max="20" value="10" />
+                <button type="button" class="stepper-btn" id="count-plus" aria-label="增加">+</button>
+              </div>
+            </div>
+
+            <div class="strategy-row column">
+              <div class="strategy-label">
+                <span>评论效果强度</span>
+                <span class="strength-value" id="strength-value">8.0</span>
+              </div>
+              <input id="strength" class="range" type="range" min="6.5" max="8.5" step="0.1" value="8" />
+              <div class="range-scale"><span>克制 6.5</span><span>规则默认 7.5–8</span><span>热情 8.5</span></div>
+              <p class="foot-note hidden" id="strength-note">已高于规则默认区间：只会让肯定更明确、更具体，不会放宽事实边界。</p>
+            </div>
+
+            <div class="strategy-grid">
+              <div class="field">
+                <label for="style">评论风格</label>
+                <select id="style">
+                  <option value="真实买家感">真实买家感</option>
+                  <option value="以平静肯定为主">以平静肯定为主</option>
+                  <option value="以强烈满意为主">以强烈满意为主</option>
+                  <option value="以短直球为主">以短直球为主</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="length-mode">评论长度</label>
+                <select id="length-mode">
+                  <option value="自动">自动（按规则）</option>
+                  <option value="偏短">偏短</option>
+                  <option value="偏长">偏长</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="language">生成语言</label>
+                <select id="language">
+                  <option value="中文">中文</option>
+                </select>
+              </div>
+            </div>
+
+            <details class="accordion" id="advanced">
+              <summary>
+                <span>高级设置</span>
+                <span class="summary-hint" id="advanced-hint">表达结构 · 使用场景 · 功效关键词 · 禁用表达</span>
+              </summary>
+              <div class="accordion-body">
+                <div class="field">
+                  <label>表达结构<span class="label-note">评论可以采用的句式结构，至少保留 1 项</span></label>
+                  <div class="tags" id="tags-structure"></div>
+                </div>
+                <div class="field">
+                  <label>使用场景<span class="label-note">来自事实卡；没有资料支持的场景不会写进评论</span></label>
+                  <div class="tags" id="tags-scene"></div>
+                </div>
+                <div class="field">
+                  <label>功效关键词<span class="label-note">等同事实卡的「允许表达的结果」</span></label>
+                  <div class="tags" id="tags-effect"></div>
+                </div>
+                <div class="field">
+                  <label>禁用表达<span class="label-note">用户指定的词一律不出现</span></label>
+                  <div class="tags" id="tags-banned"></div>
+                </div>
+                <div class="field">
+                  <label>事实卡禁止项<span class="label-note">由事实卡「不得写的内容」生成，只读</span></label>
+                  <div class="chips chips-muted" id="chips-forbidden"></div>
+                </div>
+                <div class="meta-line">
+                  <span>长度分布</span>
+                  <span class="meta-value">自适应：主体 55–85 字 · 1–2 条约 100 字长评 · 少量短评</span>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <div class="sticky-cta">
+            <button class="btn btn-primary btn-lg" id="btn-generate" disabled>生成 10 条评论</button>
+            <p class="cta-hint" id="generate-hint">生成前请先核对事实卡</p>
+          </div>
+        </aside>
+
+        <!-- ============ 右侧：结果 ============ -->
+        <section class="result-panel">
+          <div class="result-head">
+            <div class="result-title">
+              <h2>生成结果</h2>
+              <span class="count-badge" id="result-count">0 条</span>
+            </div>
+            <div class="result-actions">
+              <button class="btn btn-ghost btn-sm" id="btn-regenerate-all" title="按当前策略重新生成一批">重新生成</button>
+              <button class="btn btn-ghost btn-sm" id="btn-copy-all">全部复制</button>
+              <button class="btn btn-ghost btn-sm" id="btn-export-md">导出 Markdown</button>
+              <button class="btn btn-primary btn-sm" id="btn-export-xlsx">导出 Excel</button>
             </div>
           </div>
-          <div id="fact-sections"></div>
-          <div class="extract-note" id="extract-note"></div>
-          <label class="checkline">
-            <input type="checkbox" id="confirm-facts" />
-            我已核对以上事实卡：确认写进评论的信息都真实存在，待确认的信息不参与生成。
-          </label>
-        </div>
-      </section>
 
-      <section class="card">
-        <div class="card-head">
-          <h2><span class="step">3</span>生成模拟评论</h2>
-          <span class="hint">默认 10 条，A 组风格，全部正面，7.5–8 表达力度。</span>
-        </div>
-        <div class="actions">
-          <label class="inline-field">
-            条数
-            <input id="comment-count" type="number" min="1" max="20" value="10" />
-          </label>
-          <button class="btn btn-primary" id="btn-generate" disabled>生成模拟评论</button>
-          <span class="hint" id="generate-hint">生成前请先核对事实卡。</span>
-        </div>
-      </section>
+          <div class="result-body">
+            <div class="empty empty-lg" id="results-empty">
+              <p class="empty-title">还没有生成评论</p>
+              <p>在左侧填写产品信息、核对事实卡，然后点「生成 N 条评论」。</p>
+            </div>
+            <ol class="review-list" id="review-list"></ol>
 
-      <section class="card" id="card-results">
-        <div class="card-head">
-          <h2><span class="step">4</span>评论结果</h2>
-          <div class="result-tools">
-            <label class="checkline small">
-              <input type="checkbox" id="toggle-diagnostics" />
-              显示生成诊断
-            </label>
-            <button class="btn btn-ghost" id="btn-copy-all">复制全部</button>
-            <button class="btn btn-ghost" id="btn-export-md">导出 Markdown</button>
-            <button class="btn btn-ghost" id="btn-export-xlsx">导出 Excel</button>
+            <details class="report" id="report-box">
+              <summary>生成自检报告<span class="summary-hint" id="report-hint">程序自检，不等于独立盲测</span></summary>
+              <div id="report-body"></div>
+            </details>
           </div>
-        </div>
-        <div id="results-empty" class="empty">还没有生成评论。</div>
-        <ol class="comment-list" id="comment-list"></ol>
-        <details class="report" id="report-box">
-          <summary>生成自检报告（程序自检，不等于独立盲测）</summary>
-          <div id="report-body"></div>
-        </details>
-      </section>
+        </section>
+      </div>
     </main>
 
+    <!-- 设置 -->
     <div class="modal hidden" id="settings-modal">
       <div class="modal-panel">
         <div class="modal-head">
-          <h2>模型设置</h2>
-          <button class="btn btn-ghost" id="btn-close-settings">关闭</button>
+          <h2>设置</h2>
+          <button class="btn btn-ghost btn-sm" id="btn-close-settings">关闭</button>
         </div>
-        <p class="hint" id="config-source"></p>
+        <p class="foot-note" id="config-source"></p>
+
         <div class="field">
           <label for="cfg-base-url">接口地址（OpenAI 兼容，末尾无需 /v1）</label>
           <input id="cfg-base-url" type="text" placeholder="https://api.deepseek.com" />
@@ -140,7 +248,7 @@
           <datalist id="model-options"></datalist>
         </div>
         <div class="field">
-          <label for="cfg-api-key">密钥（只保存在服务端 config.json，不会回传到网页）</label>
+          <label for="cfg-api-key">密钥<span class="label-note">只保存在服务端 config.json，不会回传到网页</span></label>
           <input id="cfg-api-key" type="password" placeholder="留空表示保持现有密钥不变" autocomplete="off" />
         </div>
         <div class="row">
@@ -157,7 +265,7 @@
             <input id="cfg-temperature" type="number" step="0.05" min="0" max="2" value="0.95" />
           </div>
           <div class="field">
-            <label for="cfg-max-tokens">单次输出上限（tokens，推理型模型建议 32000 起）</label>
+            <label for="cfg-max-tokens">单次输出上限（tokens）</label>
             <input id="cfg-max-tokens" type="number" step="1000" min="8000" max="200000" value="32000" />
           </div>
         </div>
@@ -175,20 +283,33 @@
           <label for="cfg-ocr-key">外部 OCR 接口密钥（可选，留空保持）</label>
           <input id="cfg-ocr-key" type="password" autocomplete="off" />
         </div>
-        <div class="actions">
+
+        <div class="modal-actions">
           <button class="btn btn-primary" id="btn-save-config">保存设置</button>
           <button class="btn btn-ghost" id="btn-test-config">测试连接</button>
-          <span class="hint" id="settings-status"></span>
+          <span class="foot-note" id="settings-status"></span>
         </div>
         <pre class="test-output hidden" id="test-output"></pre>
       </div>
+    </div>
+
+    <!-- 历史记录 -->
+    <div class="drawer-mask hidden" id="history-drawer">
+      <aside class="drawer">
+        <div class="drawer-head">
+          <h2>历史记录</h2>
+          <button class="btn btn-ghost btn-sm" id="btn-close-history">关闭</button>
+        </div>
+        <p class="foot-note">每次成功生成都会自动存档，保存在本机浏览器里，最多 20 份。</p>
+        <div id="history-list" class="history-list"></div>
+      </aside>
     </div>
 
     <div class="overlay hidden" id="busy">
       <div class="busy-box">
         <div class="spinner"></div>
         <p id="busy-text">处理中…</p>
-        <p class="hint" id="busy-sub"></p>
+        <p class="foot-note" id="busy-sub"></p>
       </div>
     </div>
 

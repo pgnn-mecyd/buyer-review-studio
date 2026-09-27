@@ -1,50 +1,95 @@
 'use strict';
 
+/* =========================================================
+   买家评论生成器 · 前端交互
+   业务逻辑（接口、数据字段、生成规则）与重构前完全一致，
+   这里只改变信息架构与交互方式。
+   ========================================================= */
+
 const $ = (selector) => document.querySelector(selector);
+
+const STORAGE_KEY = 'buyer-review-studio-v2';
+
+/** 规则蓝本允许的 A 组表达结构 */
+const STRUCTURES = ['结果先行', '操作先行', '感官细节', '个人偏好', '明确场景', '简短直球'];
+
+const COMMENT_TYPE_RULES = [
+  [/功效|效果|变化|改善/, '功效型'],
+  [/成分|配方|参数|规格|标签|净含量/, '参数型'],
+  [/用量|取用|一泵|按压|泵头|容量|瓶身/, '用量型'],
+  [/清爽|质地|气味|香味|口感|手感|颜色|外观|水感|黏/, '感官型'],
+  [/步骤|顺手|省事|方便|时间|操作|速度|效率/, '操作型'],
+  [/早晚|早上|晚上|通勤|出门|办公室|场景|季节/, '场景型'],
+];
 
 const state = {
   config: null,
   images: [],
+  productName: '',
+  productSpec: '',
+  sellingPoints: [],
   factCard: null,
   comments: [],
   report: null,
   extraction: null,
   generation: { model: '', generatedAt: '', productName: '' },
-  showDiagnostics: false,
+  options: {
+    strength: 8,
+    style: '真实买家感',
+    length: '自动',
+    language: '中文',
+    structure: [...STRUCTURES],
+    banned: [],
+  },
+  history: [],
 };
 
-const FACT_SECTIONS = [
-  {
-    key: '明确信息',
-    title: '明确信息（评论唯一可用的事实依据）',
-    kind: 'objects',
-    fields: ['类别', '内容'],
-    cls: 'buildable',
-    addLabel: '添加一条明确信息',
-  },
-  {
-    key: '待确认',
-    title: '待确认（识别不清或资料未提供，不会写进评论）',
-    kind: 'objects',
-    fields: ['内容', '原因'],
-    cls: 'pending',
-    addLabel: '添加一条待确认',
-  },
-  { key: '允许表达的结果', title: '允许表达的结果', kind: 'strings', cls: 'buildable', addLabel: '添加一条允许表达的结果' },
-  { key: '允许场景与动作', title: '允许场景与动作', kind: 'strings', cls: 'buildable', addLabel: '添加一条场景或动作' },
-  { key: '感官信息', title: '感官信息', kind: 'strings', cls: 'buildable', addLabel: '添加一条感官信息' },
-  { key: '不得写的内容', title: '不得写的内容（严禁出现在评论里）', kind: 'strings', cls: '', addLabel: '添加一条禁止内容' },
-];
+/* --------------------------------------------------------- *
+ * 基础工具
+ * --------------------------------------------------------- */
 
-/* ---------------- 基础工具 ---------------- */
+function toText(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map(toText).filter(Boolean).join('；');
+  return Object.entries(value)
+    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .map(([k, v]) => `${k}：${toText(v)}`)
+    .join('；');
+}
 
-function toast(message, bad = false) {
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+}
+
+function countChars(text) {
+  return (String(text).match(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaffA-Za-z0-9]/g) || []).length;
+}
+
+let toastTimer = null;
+
+/** toast 支持一个「撤销」类动作按钮 */
+function toast(message, options = {}) {
   const el = $('#toast');
-  el.textContent = message;
-  el.classList.toggle('bad', Boolean(bad));
+  el.className = `toast${options.bad ? ' bad' : ''}`;
+  el.innerHTML = '';
+  const text = document.createElement('span');
+  text.textContent = message;
+  el.appendChild(text);
+  if (options.actionLabel && typeof options.onAction === 'function') {
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.textContent = options.actionLabel;
+    action.addEventListener('click', () => {
+      el.classList.add('hidden');
+      options.onAction();
+    });
+    el.appendChild(action);
+  }
   el.classList.remove('hidden');
-  clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => el.classList.add('hidden'), 2600);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), options.duration || 3200);
 }
 
 let busyTimer = null;
@@ -58,14 +103,12 @@ function busy(on, text = '处理中…', sub = '') {
     return;
   }
   $('#busy-text').textContent = text;
-  $('#busy-sub').textContent = sub;
-  el.classList.remove('hidden');
   const started = Date.now();
+  const render = () => { $('#busy-sub').textContent = `${sub}${sub ? ' · ' : ''}已用时 ${Math.round((Date.now() - started) / 1000)} 秒`; };
+  render();
+  el.classList.remove('hidden');
   clearInterval(busyTimer);
-  busyTimer = setInterval(() => {
-    const seconds = Math.round((Date.now() - started) / 1000);
-    $('#busy-sub').textContent = `${sub}${sub ? ' · ' : ''}已用时 ${seconds} 秒`;
-  }, 1000);
+  busyTimer = setInterval(render, 1000);
 }
 
 async function api(path, options = {}) {
@@ -74,553 +117,27 @@ async function api(path, options = {}) {
     headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
-  const contentType = response.headers.get('content-type') || '';
+  const type = response.headers.get('content-type') || '';
   if (!response.ok) {
-    if (contentType.includes('application/json')) {
-      const payload = await response.json();
+    if (type.includes('application/json')) {
+      const payload = await response.json().catch(() => ({}));
       throw new Error(payload.error || `请求失败（${response.status}）`);
     }
     throw new Error(`请求失败（${response.status}）`);
   }
-  if (contentType.includes('application/json')) return response.json();
-  return response;
+  return type.includes('application/json') ? response.json() : response;
 }
 
-/** 先把值转成字符串，避免模型返回对象/数字时页面渲染成 [object Object] */
-function toText(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (Array.isArray(value)) return value.map(toText).filter(Boolean).join('；');
-  return Object.entries(value)
-    .filter(([, v]) => v !== null && v !== undefined && v !== '')
-    .map(([k, v]) => `${k}：${toText(v)}`)
-    .join('；');
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || 'download';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
-
-function makeTextarea(value, placeholder, onInput, rows = 1) {
-  const el = document.createElement('textarea');
-  el.value = toText(value);
-  el.rows = rows;
-  el.placeholder = placeholder;
-  el.addEventListener('input', () => onInput(el.value));
-  return el;
-}
-
-function makeButton(label, className, onClick) {
-  const el = document.createElement('button');
-  el.type = 'button';
-  el.className = className;
-  el.textContent = label;
-  el.addEventListener('click', onClick);
-  return el;
-}
-
-/* ---------------- 配置 ---------------- */
-
-async function loadConfig() {
-  const data = await api('/api/config');
-  state.config = data;
-  const status = $('#model-status');
-  const ready = data.ready;
-  status.textContent = ready
-    ? `已连接配置：${data.model || '未设模型'} · ${data.baseUrlHost || ''}${data.visionHint ? ` · ${data.visionHint}` : ''}`
-    : `${data.message || '模型尚未配置'}（点右侧「模型设置」填写）`;
-  status.className = `model-status ${ready ? 'ok' : 'bad'}`;
-
-  $('#cfg-base-url').value = data.baseUrl || '';
-  $('#cfg-model').value = data.model || '';
-  $('#cfg-vision').value = data.visionMode || 'auto';
-  $('#cfg-temperature').value = data.temperature ?? 0.95;
-  $('#cfg-max-tokens').value = data.maxTokens ?? 32000;
-  $('#cfg-ocr-url').value = data.ocr?.baseUrl || '';
-  $('#cfg-ocr-model').value = data.ocr?.model || '';
-  $('#cfg-api-key').placeholder = data.apiKeyMasked
-    ? `已配置：${data.apiKeyMasked}（留空保持不变）`
-    : '粘贴你的接口密钥';
-
-  const sources = data.sources || {};
-  $('#config-source').textContent = [
-    `接口地址来源：${sources.baseUrl || '未知'}`,
-    `模型 ID 来源：${sources.model || '未知'}`,
-    `密钥来源：${sources.apiKey || '未知'}`,
-    `本机 OCR：${data.localOcr?.ok ? `可用（${data.localOcr.language}）` : `不可用（${data.localOcr?.reason || '未知'}）`}`,
-    `外部 OCR：${sources.ocr || '未配置'}`,
-  ].join(' ｜ ');
-
-  updateGenerateAvailability();
-}
-
-async function saveSettings() {
-  const payload = {
-    baseUrl: $('#cfg-base-url').value,
-    model: $('#cfg-model').value,
-    apiKey: $('#cfg-api-key').value,
-    vision: $('#cfg-vision').value,
-    temperature: $('#cfg-temperature').value,
-    maxTokens: $('#cfg-max-tokens').value,
-    ocr: { baseUrl: $('#cfg-ocr-url').value, model: $('#cfg-ocr-model').value, apiKey: $('#cfg-ocr-key').value },
-  };
-  $('#settings-status').textContent = '保存中…';
-  try {
-    await api('/api/config', { body: payload });
-    $('#cfg-api-key').value = '';
-    $('#cfg-ocr-key').value = '';
-    await loadConfig();
-    $('#settings-status').textContent = '已保存到服务端 config.json。';
-    toast('设置已保存');
-  } catch (err) {
-    $('#settings-status').textContent = `保存失败：${err.message}`;
-    toast(err.message, true);
-  }
-}
-
-async function loadModels() {
-  const output = $('#test-output');
-  $('#settings-status').textContent = '正在读取模型列表…';
-  try {
-    const data = await api('/api/config/models', {
-      body: {
-        baseUrl: $('#cfg-base-url').value,
-        apiKey: $('#cfg-api-key').value,
-      },
-    });
-    const options = $('#model-options');
-    options.innerHTML = '';
-    data.models.forEach((model) => {
-      const option = document.createElement('option');
-      option.value = model.id;
-      const modalities = model.inputModalities ? `（${model.inputModalities.join('/')}）` : '';
-      option.label = `${model.name || model.id}${modalities}`;
-      options.appendChild(option);
-    });
-    output.classList.remove('hidden');
-    output.textContent = data.models
-      .map((model) => `${model.id}${model.name ? ` — ${model.name}` : ''}${model.inputModalities ? ` ｜ 输入：${model.inputModalities.join('、')}` : ''}`)
-      .join('\n');
-    $('#settings-status').textContent = `读取到 ${data.models.length} 个模型，请从下拉里选择真实 ID。`;
-  } catch (err) {
-    output.classList.remove('hidden');
-    output.textContent = `读取失败：${err.message}`;
-    $('#settings-status').textContent = '读取模型列表失败。';
-  }
-}
-
-async function testConnection() {
-  const output = $('#test-output');
-  output.classList.remove('hidden');
-  output.textContent = '正在测试（会真实调用一次接口）…';
-  $('#settings-status').textContent = '测试中…';
-  try {
-    const data = await api('/api/config/test', { body: { includeVisionProbe: true } });
-    output.textContent = data.lines.join('\n');
-    $('#settings-status').textContent = data.ok ? '测试通过。' : '测试未通过。';
-  } catch (err) {
-    output.textContent = `测试失败：${err.message}`;
-    $('#settings-status').textContent = '测试失败。';
-  }
-}
-
-/* ---------------- 图片 ---------------- */
-
-function renderThumbs() {
-  const wrap = $('#thumbs');
-  wrap.innerHTML = '';
-  state.images.forEach((image, index) => {
-    const item = document.createElement('div');
-    item.className = 'thumb';
-    const img = document.createElement('img');
-    img.src = image.dataUrl;
-    img.alt = image.name;
-    const name = document.createElement('span');
-    name.className = 'thumb-name';
-    name.textContent = image.name;
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.textContent = '×';
-    remove.title = '移除这张图片';
-    remove.addEventListener('click', () => {
-      state.images.splice(index, 1);
-      renderThumbs();
-    });
-    item.append(img, name, remove);
-    wrap.appendChild(item);
-  });
-}
-
-function addFiles(fileList) {
-  const files = Array.from(fileList || []).filter((file) => file.type.startsWith('image/'));
-  if (!files.length) return;
-  if (state.images.length + files.length > 8) {
-    toast('最多 8 张图片，多余的已忽略。', true);
-  }
-  const accepted = files.slice(0, Math.max(0, 8 - state.images.length));
-  accepted.forEach((file) => {
-    if (file.size > 12 * 1024 * 1024) {
-      toast(`${file.name} 超过 12MB，已跳过。`, true);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      state.images.push({ name: file.name, dataUrl: String(reader.result) });
-      renderThumbs();
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-/* ---------------- 事实卡 ---------------- */
-
-function normalizeFactCard(raw) {
-  const source = raw && typeof raw === 'object' ? raw : {};
-  const card = {
-    产品名称: toText(source.产品名称),
-    品类: toText(source.品类),
-    明确信息: [],
-    待确认: [],
-    允许表达的结果: [],
-    允许场景与动作: [],
-    感官信息: [],
-    不得写的内容: [],
-  };
-  for (const section of FACT_SECTIONS) {
-    const value = source[section.key];
-    if (section.kind === 'objects') {
-      const list = Array.isArray(value) ? value : value ? [value] : [];
-      card[section.key] = list.map((item) => {
-        const row = {};
-        if (item && typeof item === 'object' && !Array.isArray(item)) {
-          section.fields.forEach((field) => {
-            row[field] = toText(item[field]);
-          });
-        } else {
-          row[section.fields[0]] = toText(item);
-          row[section.fields[1]] = '';
-        }
-        return row;
-      });
-    } else {
-      const list = Array.isArray(value) ? value : value ? [value] : [];
-      card[section.key] = list.map((item) => toText(item)).filter(Boolean);
-    }
-  }
-  return card;
-}
-
-function renderFactCard() {
-  const card = state.factCard;
-  if (!card) return;
-  $('#facts-empty').classList.add('hidden');
-  $('#facts-editor').classList.remove('hidden');
-  $('#fact-name').value = card.产品名称 || '';
-  $('#fact-category').value = card.品类 || '';
-
-  const container = $('#fact-sections');
-  container.innerHTML = '';
-
-  for (const section of FACT_SECTIONS) {
-    const box = document.createElement('section');
-    box.className = `fact-section ${section.cls}`;
-
-    const head = document.createElement('header');
-    const title = document.createElement('h3');
-    const count = Array.isArray(card[section.key]) ? card[section.key].length : 0;
-    title.textContent = `${section.title}（${count}）`;
-    head.appendChild(title);
-    head.appendChild(
-      makeButton(section.addLabel, 'btn btn-mini', () => {
-        if (section.kind === 'objects') {
-          const row = {};
-          section.fields.forEach((field) => {
-            row[field] = '';
-          });
-          card[section.key].push(row);
-        } else {
-          card[section.key].push('');
-        }
-        renderFactCard();
-      }),
-    );
-    box.appendChild(head);
-
-    const list = Array.isArray(card[section.key]) ? card[section.key] : [];
-    if (!list.length) {
-      const empty = document.createElement('p');
-      empty.className = 'hint';
-      empty.textContent = '（无）';
-      box.appendChild(empty);
-    }
-    list.forEach((item, index) => {
-      const rowEl = document.createElement('div');
-      rowEl.className = 'fact-row';
-      if (section.kind === 'objects') {
-        section.fields.forEach((field) => {
-          const wrap = document.createElement('div');
-          wrap.style.flex = field === '内容' ? '3' : '1';
-          wrap.appendChild(
-            makeTextarea(
-              item[field],
-              field,
-              (value) => {
-                card[section.key][index][field] = value;
-              },
-              1,
-            ),
-          );
-          rowEl.appendChild(wrap);
-        });
-      } else {
-        const wrap = document.createElement('div');
-        wrap.style.flex = '1';
-        wrap.appendChild(
-          makeTextarea(
-            item,
-            section.title,
-            (value) => {
-              card[section.key][index] = value;
-            },
-            1,
-          ),
-        );
-        rowEl.appendChild(wrap);
-      }
-      rowEl.appendChild(
-        makeButton('删除', 'btn btn-mini btn-danger-mini', () => {
-          card[section.key].splice(index, 1);
-          renderFactCard();
-        }),
-      );
-      box.appendChild(rowEl);
-    });
-    container.appendChild(box);
-  }
-  updateGenerateAvailability();
-  persist();
-}
-
-function updateGenerateAvailability() {
-  const confirmed = $('#confirm-facts').checked;
-  const hasCard = Boolean(state.factCard);
-  const button = $('#btn-generate');
-  button.disabled = !(hasCard && confirmed);
-  $('#generate-hint').textContent = !hasCard
-    ? '生成前请先核对事实卡。'
-    : confirmed
-      ? '将按规则先生成候选，再自检筛选。'
-      : '请先勾选「我已核对以上事实卡」。';
-}
-
-async function extractFacts() {
-  const productName = $('#product-name').value.trim();
-  const sellingPoints = $('#selling-points').value.trim();
-  if (!productName && !sellingPoints && !state.images.length) {
-    toast('请至少填写产品名称、卖点文字或上传图片。', true);
-    return;
-  }
-  busy(true, '正在识读产品资料…', state.images.length ? `${state.images.length} 张图片` : '文字输入');
-  try {
-    const data = await api('/api/facts', {
-      body: { productName, sellingPoints, images: state.images.map((image) => ({ name: image.name, dataUrl: image.dataUrl })) },
-    });
-    state.factCard = normalizeFactCard(data.factCard);
-    state.extraction = data.extraction;
-    if (!state.factCard.产品名称 && productName) state.factCard.产品名称 = productName;
-    $('#confirm-facts').checked = false;
-    renderFactCard();
-    const note = $('#extract-note');
-    note.textContent = data.extraction?.note || '';
-    note.classList.toggle('hidden', !data.extraction?.note);
-    toast('事实卡已生成，请核对后勾选确认。');
-  } catch (err) {
-    toast(err.message, true);
-  } finally {
-    busy(false);
-  }
-}
-
-/* ---------------- 生成评论 ---------------- */
-
-function badgeClass(item) {
-  if (item.band === 'long') return 'badge chars-long';
-  if (item.chars < 20) return 'badge chars-warn';
-  return 'badge chars-ok';
-}
-
-function renderComments() {
-  const list = $('#comment-list');
-  list.innerHTML = '';
-  const comments = state.comments;
-  $('#results-empty').classList.toggle('hidden', comments.length > 0);
-
-  comments.forEach((item, index) => {
-    const li = document.createElement('li');
-    li.className = 'comment-item';
-
-    const head = document.createElement('header');
-    const no = document.createElement('span');
-    no.className = 'comment-no';
-    no.textContent = `第 ${index + 1} 条`;
-    head.appendChild(no);
-
-    const chars = document.createElement('span');
-    chars.className = badgeClass(item);
-    chars.textContent = `${item.chars} 字`;
-    head.appendChild(chars);
-
-    if (item.meta?.emotion) {
-      const emo = document.createElement('span');
-      emo.className = 'badge';
-      emo.textContent = item.meta.emotion;
-      head.appendChild(emo);
-    }
-    const restored = document.createElement('span');
-    restored.className = 'hint';
-    restored.style.display = 'none';
-    head.appendChild(restored);
-    li.appendChild(head);
-
-    const textarea = document.createElement('textarea');
-    textarea.value = item.text;
-    textarea.rows = Math.max(3, Math.ceil(item.text.length / 60));
-    const counter = document.createElement('div');
-    counter.className = 'item-diag';
-    const refresh = () => {
-      const charsValue = (textarea.value.match(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaffA-Za-z0-9]/g) || []).length;
-      item.chars = charsValue;
-      chars.textContent = `${charsValue} 字`;
-      chars.className = badgeClass({ band: item.band, chars: charsValue });
-      counter.textContent = state.showDiagnostics
-        ? `主关注点：${item.meta?.focus || '—'} ｜ 正面结果：${item.meta?.result || '—'} ｜ 观察动作：${item.meta?.action || '—'} ｜ 开头：${item.meta?.opening || '—'} ｜ 收尾：${item.meta?.ending || '—'}`
-        : '';
-      counter.classList.toggle('hidden', !state.showDiagnostics);
-    };
-    textarea.addEventListener('input', () => {
-      item.text = textarea.value;
-      refresh();
-      persist();
-    });
-    li.appendChild(textarea);
-
-    const tools = document.createElement('div');
-    tools.className = 'item-tools';
-    tools.appendChild(makeButton('复制这条', 'btn btn-mini', () => copyText(item.text, '已复制该条评论')));
-    tools.appendChild(makeButton('重新生成这条', 'btn btn-mini', () => regenerateOne(index, textarea, restored)));
-    li.appendChild(tools);
-    li.appendChild(counter);
-    refresh();
-    list.appendChild(li);
-  });
-}
-
-async function regenerateOne(index, textarea, restoredLabel) {
-  if (!state.factCard) return;
-  const current = state.comments[index];
-  const others = state.comments.filter((_, i) => i !== index);
-  const targetLength =
-    current.chars >= 88 ? '90–110 字（高度赞扬长评，全正面）' : current.chars >= 50 ? '55–85 字' : '20–50 字（短评）';
-  busy(true, `正在重新生成第 ${index + 1} 条…`, '只重写这一条，其余不动');
-  try {
-    const data = await api('/api/comments/regenerate', {
-      body: {
-        factCard: state.factCard,
-        index: index + 1,
-        targetLength,
-        targetEmotion: current.meta?.emotion || '明确满意',
-        currentText: current.text,
-        usedObservations: others.map((item) => `${item.meta?.focus || ''}|${item.meta?.result || ''}|${item.meta?.action || ''}`).filter(Boolean),
-        avoidTexts: others.map((item) => item.text),
-      },
-    });
-    state.comments[index] = data.comment;
-    renderComments();
-    if (data.warnings?.length) {
-      restoredLabel.style.display = '';
-      restoredLabel.textContent = `提示：${data.warnings.map((w) => `${w.type}（${w.detail}）`).join('；')}`;
-    }
-    toast('已重新生成这一条');
-  } catch (err) {
-    toast(err.message, true);
-  } finally {
-    busy(false);
-  }
-}
-
-async function generateComments() {
-  if (!state.factCard) return;
-  if (!$('#confirm-facts').checked) {
-    toast('请先勾选「我已核对以上事实卡」。', true);
-    return;
-  }
-  const count = Math.min(20, Math.max(1, Number.parseInt($('#comment-count').value, 10) || 10));
-  busy(true, '正在生成候选评论…', '先生成候选，再做事实、正面与去重筛选');
-  try {
-    const data = await api('/api/comments', { body: { factCard: state.factCard, count } });
-    state.comments = (data.comments || []).map((item) => ({ ...item }));
-    state.report = data.report;
-    state.generation = {
-      model: data.model,
-      generatedAt: data.generatedAt,
-      productName: state.factCard.产品名称 || $('#product-name').value.trim(),
-    };
-    renderComments();
-    renderReport();
-    persist();
-    if (state.comments.length < count) {
-      toast(`本次只产出 ${state.comments.length}/${count} 条合规评论，可查看自检报告后重试。`, true);
-    } else {
-      toast(`已生成 ${state.comments.length} 条模拟评论`);
-    }
-  } catch (err) {
-    toast(err.message, true);
-  } finally {
-    busy(false);
-  }
-}
-
-function renderReport() {
-  const body = $('#report-body');
-  const report = state.report;
-  if (!report) {
-    body.innerHTML = '<p class="hint">本次还没有生成记录。</p>';
-    return;
-  }
-  const lines = [
-    `模型：${report.model || '未记录'}　生成时间：${report.generatedAt || ''}　耗时：${(report.elapsedMs / 1000).toFixed(1)} 秒`,
-    `候选 ${report.candidateCount} 条 → 通过事实与正面检查 ${report.passed} 条 → 语义去重后保留 ${report.selected} 条`,
-    `篇幅分布：约 100 字长评 ${report.length.long} 条 ｜ 主体 55–85 字 ${report.length.main} 条 ｜ 短评 ${report.length.short} 条`,
-    `情绪分布：${Object.entries(report.emotions || {}).map(([k, v]) => `${k} ${v}`).join('，') || '—'}`,
-    `事实依据：${report.factSummary}`,
-  ];
-  if (report.warnings?.length) {
-    lines.push(`需要人工复核：${report.warnings.map((w) => `第 ${w.index} 条 ${w.type}（${w.detail}）`).join('；')}`);
-  } else {
-    lines.push('需要人工复核：无');
-  }
-  if (report.fillerOveruse?.length) {
-    lines.push(`口头禅超限：${report.fillerOveruse.map((f) => `${f.word}×${f.times}`).join('、')}`);
-  }
-  if (report.focusOveruse?.length) {
-    lines.push(`同一卖点条数偏多（事实较少时属正常）：${report.focusOveruse.map((f) => `${f.focus}×${f.times}`).join('、')}`);
-  }
-  lines.push('');
-  lines.push('说明：以上为一轮生成程序自检结果，不等于独立盲测、用户认可或跨品类验收。');
-
-  const html = [`<pre>${lines.join('\n')}</pre>`];
-  if (report.rejected?.length) {
-    html.push('<details><summary>被筛掉的候选（节选，最多 40 条）</summary><ul class="reject-list">');
-    report.rejected.slice(0, 20).forEach((item) => {
-      html.push(`<li><strong>${item.stage}</strong>：${item.reason}<br />${escapeHtml(item.text.slice(0, 80))}</li>`);
-    });
-    html.push('</ul></details>');
-  }
-  body.innerHTML = html.join('');
-}
-
-function escapeHtml(text) {
-  return String(text).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-}
-
-/* ---------------- 复制与导出 ---------------- */
 
 async function copyText(text, message) {
   const value = String(text || '');
@@ -637,6 +154,896 @@ async function copyText(text, message) {
     document.execCommand('copy');
     helper.remove();
     toast(message || '已复制');
+  }
+}
+
+function autoGrow(el) {
+  el.style.height = 'auto';
+  el.style.height = `${Math.min(el.scrollHeight, 900)}px`;
+}
+
+/* --------------------------------------------------------- *
+ * Chips 组件
+ * --------------------------------------------------------- */
+
+function startChipInput(container, placeholder, commit) {
+  if (container.querySelector('.chip-input')) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'chip-input';
+  input.placeholder = placeholder || '输入后回车';
+  container.appendChild(input);
+  input.focus();
+
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    const value = input.value.trim();
+    input.remove();
+    if (save && value) {
+      const values = value.split(/[\n,，;；]+/).map((item) => item.trim()).filter(Boolean);
+      commit(values);
+    }
+  };
+
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === 'Escape') {
+      finish(false);
+    }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+/**
+ * 渲染一组 chips。
+ * items: string[]；removable: 是否可删除；addLabel: 添加按钮文案（不传则不显示）
+ */
+function renderChips(container, items, config = {}) {
+  const { removable = true, addLabel = '', onAdd = null, onRemove = null, muted = false } = config;
+  container.className = `tags${muted ? ' chips-muted' : ''}`;
+  container.innerHTML = '';
+
+  items.forEach((item, index) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    const label = document.createElement('span');
+    label.className = 'chip-label';
+    label.textContent = item;
+    label.title = item;
+    chip.appendChild(label);
+    if (removable && onRemove) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'chip-x';
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', `删除 ${item}`);
+      remove.addEventListener('click', () => onRemove(index));
+      chip.appendChild(remove);
+    }
+    container.appendChild(chip);
+  });
+
+  if (onAdd) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'chip-add';
+    add.textContent = addLabel || '+ 添加';
+    add.addEventListener('click', () => {
+      startChipInput(container, '输入后回车', (values) => values.forEach((value) => onAdd(value)));
+    });
+    container.appendChild(add);
+  }
+}
+
+/** 结构选择：可开关的 chips */
+function renderToggleChips(container, all, selected, onToggle) {
+  container.className = 'tags';
+  container.innerHTML = '';
+  all.forEach((item) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = `chip chip-toggle ${selected.includes(item) ? 'on' : 'off'}`;
+    chip.textContent = item;
+    chip.addEventListener('click', () => onToggle(item));
+    container.appendChild(chip);
+  });
+}
+
+/* --------------------------------------------------------- *
+ * 事实卡数据
+ * --------------------------------------------------------- */
+
+function emptyFactCard() {
+  return {
+    产品名称: '',
+    品类: '',
+    明确信息: [],
+    待确认: [],
+    允许表达的结果: [],
+    允许场景与动作: [],
+    感官信息: [],
+    不得写的内容: [],
+  };
+}
+
+function normalizeFactCard(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const card = emptyFactCard();
+  card.产品名称 = toText(source.产品名称);
+  card.品类 = toText(source.品类);
+
+  const rows = (value, fields) => {
+    const list = Array.isArray(value) ? value : value ? [value] : [];
+    return list.map((item) => {
+      const row = {};
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        fields.forEach((field) => { row[field] = toText(item[field]); });
+      } else {
+        fields.forEach((field) => { row[field] = ''; });
+        row[fields[0]] = toText(item);
+      }
+      return row;
+    });
+  };
+
+  card.明确信息 = rows(source.明确信息, ['类别', '内容', '来源']);
+  card.待确认 = rows(source.待确认, ['内容', '原因']);
+  for (const key of ['允许表达的结果', '允许场景与动作', '感官信息', '不得写的内容']) {
+    const list = Array.isArray(source[key]) ? source[key] : source[key] ? [source[key]] : [];
+    card[key] = list.map((item) => toText(item)).filter(Boolean);
+  }
+  return card;
+}
+
+/* --------------------------------------------------------- *
+ * 渲染：产品信息
+ * --------------------------------------------------------- */
+
+function renderThumbs() {
+  const wrap = $('#thumbs');
+  wrap.innerHTML = '';
+  state.images.forEach((image, index) => {
+    const item = document.createElement('div');
+    item.className = 'thumb';
+    item.title = image.name;
+    const img = document.createElement('img');
+    img.src = image.dataUrl;
+    img.alt = image.name;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', `移除 ${image.name}`);
+    remove.addEventListener('click', () => {
+      state.images.splice(index, 1);
+      renderThumbs();
+    });
+    item.append(img, remove);
+    wrap.appendChild(item);
+  });
+  $('#media-add-label').textContent = state.images.length ? '继续添加' : '添加产品图';
+}
+
+function renderProductTags() {
+  renderChips($('#tags-selling'), state.sellingPoints, {
+    addLabel: '+ 添加卖点',
+    onAdd: (value) => {
+      if (state.sellingPoints.includes(value)) return;
+      state.sellingPoints.push(value);
+      renderProductTags();
+      persist();
+    },
+    onRemove: (index) => {
+      state.sellingPoints.splice(index, 1);
+      renderProductTags();
+      persist();
+    },
+  });
+
+  const efficacy = state.factCard ? state.factCard['允许表达的结果'] : [];
+  const efficacyContainer = $('#tags-efficacy');
+  if (!state.factCard) {
+    efficacyContainer.className = 'tags';
+    efficacyContainer.innerHTML = '<span class="foot-note">识别后自动填入</span>';
+  } else {
+    renderChips(efficacyContainer, efficacy, {
+      addLabel: '+ 添加功效',
+      onAdd: (value) => {
+        state.factCard['允许表达的结果'].push(value);
+        renderProductTags();
+        renderAdvancedTags();
+        persist();
+      },
+      onRemove: (index) => {
+        state.factCard['允许表达的结果'].splice(index, 1);
+        renderProductTags();
+        renderAdvancedTags();
+        persist();
+      },
+    });
+  }
+  $('#product-hint').textContent = state.factCard ? '已生成事实卡' : '';
+}
+
+/* --------------------------------------------------------- *
+ * 渲染：事实卡
+ * --------------------------------------------------------- */
+
+function renderFactSections() {
+  const container = $('#fact-sections');
+  container.innerHTML = '';
+  const card = state.factCard;
+  if (!card) return;
+
+  const section = (title, className = '') => {
+    const box = document.createElement('section');
+    box.className = `fact-section ${className}`;
+    const head = document.createElement('header');
+    const h3 = document.createElement('h3');
+    h3.textContent = title;
+    head.appendChild(h3);
+    box.appendChild(head);
+    container.appendChild(box);
+    return { box, head };
+  };
+
+  // 明确信息
+  {
+    const { box, head } = section(`明确信息（${card.明确信息.length}）`);
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'btn btn-ghost btn-sm';
+    add.textContent = '添加';
+    add.addEventListener('click', () => {
+      card.明确信息.push({ 类别: '', 内容: '', 来源: '手动补充' });
+      renderFactSections();
+      persist();
+    });
+    head.appendChild(add);
+
+    card.明确信息.forEach((row, index) => {
+      const line = document.createElement('div');
+      line.className = 'fact-row';
+      const category = document.createElement('div');
+      category.className = 'fact-cat';
+      const catInput = document.createElement('input');
+      catInput.type = 'text';
+      catInput.value = row.类别 || '';
+      catInput.placeholder = '类别';
+      catInput.addEventListener('input', () => { row.类别 = catInput.value; persist(); });
+      category.appendChild(catInput);
+      const content = document.createElement('div');
+      const contentInput = document.createElement('textarea');
+      contentInput.rows = 1;
+      contentInput.value = row.内容 || '';
+      contentInput.placeholder = '事实内容';
+      contentInput.addEventListener('input', () => {
+        row.内容 = contentInput.value;
+        autoGrow(contentInput);
+        persist();
+      });
+      content.appendChild(contentInput);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'icon-btn';
+      remove.textContent = '×';
+      remove.title = '删除这条事实';
+      remove.addEventListener('click', () => {
+        card.明确信息.splice(index, 1);
+        renderFactSections();
+        persist();
+      });
+      line.append(category, content, remove);
+      box.appendChild(line);
+      requestAnimationFrame(() => autoGrow(contentInput));
+    });
+    if (!card.明确信息.length) box.insertAdjacentHTML('beforeend', '<p class="foot-note">还没有明确信息。</p>');
+  }
+
+  // 待确认
+  {
+    const { box } = section(`待确认（${card.待确认.length}）· 不会写进评论`, 'pending');
+    card.待确认.forEach((row, index) => {
+      const line = document.createElement('div');
+      line.className = 'fact-row';
+      const content = document.createElement('div');
+      const contentInput = document.createElement('textarea');
+      contentInput.rows = 1;
+      contentInput.value = row.内容 || '';
+      contentInput.placeholder = '待确认内容';
+      contentInput.addEventListener('input', () => {
+        row.内容 = contentInput.value;
+        autoGrow(contentInput);
+        persist();
+      });
+      content.appendChild(contentInput);
+      const reason = document.createElement('div');
+      const reasonInput = document.createElement('input');
+      reasonInput.type = 'text';
+      reasonInput.value = row.原因 || '';
+      reasonInput.placeholder = '原因';
+      reasonInput.addEventListener('input', () => { row.原因 = reasonInput.value; persist(); });
+      reason.appendChild(reasonInput);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'icon-btn';
+      remove.textContent = '×';
+      remove.title = '从待确认里移除';
+      remove.addEventListener('click', () => {
+        card.待确认.splice(index, 1);
+        renderFactSections();
+        persist();
+      });
+      line.append(content, reason, remove);
+      box.appendChild(line);
+      requestAnimationFrame(() => autoGrow(contentInput));
+    });
+    if (!card.待确认.length) box.insertAdjacentHTML('beforeend', '<p class="foot-note">没有待确认内容。</p>');
+  }
+
+  // 感官信息
+  {
+    const { box, head } = section(`感官信息（${card.感官信息.length}）`);
+    const tags = document.createElement('div');
+    tags.className = 'tags';
+    box.appendChild(tags);
+    renderChips(tags, card.感官信息, {
+      addLabel: '+ 添加',
+      onAdd: (value) => { card.感官信息.push(value); renderFactSections(); persist(); },
+      onRemove: (index) => { card.感官信息.splice(index, 1); renderFactSections(); persist(); },
+    });
+    head.style.marginBottom = '6px';
+  }
+}
+
+function renderFactCard() {
+  const hasCard = Boolean(state.factCard);
+  $('#facts-empty').classList.toggle('hidden', hasCard);
+  $('#facts-editor').classList.toggle('hidden', !hasCard);
+  if (hasCard) {
+    $('#fact-name').value = state.factCard.产品名称 || '';
+    $('#fact-category').value = state.factCard.品类 || '';
+    renderFactSections();
+    const known = state.factCard.明确信息.length;
+    const pending = state.factCard.待确认.length;
+    $('#facts-summary').textContent = `明确 ${known} 条 · 待确认 ${pending} 条`;
+  } else {
+    $('#facts-summary').textContent = '尚未生成';
+  }
+  renderProductTags();
+  renderAdvancedTags();
+}
+
+/* --------------------------------------------------------- *
+ * 渲染：高级设置
+ * --------------------------------------------------------- */
+
+function renderAdvancedTags() {
+  renderToggleChips($('#tags-structure'), STRUCTURES, state.options.structure, (item) => {
+    const index = state.options.structure.indexOf(item);
+    if (index >= 0) {
+      if (state.options.structure.length <= 1) {
+        toast('至少保留一种表达结构', { bad: true });
+        return;
+      }
+      state.options.structure.splice(index, 1);
+    } else {
+      state.options.structure.push(item);
+    }
+    renderAdvancedTags();
+    persist();
+  });
+
+  const card = state.factCard;
+  const sceneBox = $('#tags-scene');
+  const effectBox = $('#tags-effect');
+  const bannedBox = $('#tags-banned');
+  const forbiddenBox = $('#chips-forbidden');
+
+  if (!card) {
+    for (const box of [sceneBox, effectBox]) {
+      box.className = 'tags';
+      box.innerHTML = '<span class="foot-note">识别事实卡后自动填入</span>';
+    }
+    forbiddenBox.className = 'tags chips-muted';
+    forbiddenBox.innerHTML = '<span class="foot-note">识别事实卡后自动生成</span>';
+  } else {
+    renderChips(sceneBox, card['允许场景与动作'], {
+      addLabel: '+ 添加',
+      onAdd: (value) => { card['允许场景与动作'].push(value); renderAdvancedTags(); persist(); },
+      onRemove: (index) => { card['允许场景与动作'].splice(index, 1); renderAdvancedTags(); persist(); },
+    });
+    renderChips(effectBox, card['允许表达的结果'], {
+      addLabel: '+ 添加',
+      onAdd: (value) => { card['允许表达的结果'].push(value); renderAdvancedTags(); renderProductTags(); persist(); },
+      onRemove: (index) => { card['允许表达的结果'].splice(index, 1); renderAdvancedTags(); renderProductTags(); persist(); },
+    });
+    renderChips(forbiddenBox, card['不得写的内容'], { removable: false, muted: true });
+  }
+
+  renderChips(bannedBox, state.options.banned, {
+    addLabel: '+ 添加',
+    onAdd: (value) => { state.options.banned.push(value); renderAdvancedTags(); persist(); },
+    onRemove: (index) => { state.options.banned.splice(index, 1); renderAdvancedTags(); persist(); },
+  });
+
+  const counts = `${state.options.structure.length} 项结构 · ${card ? card['允许场景与动作'].length : 0} 个场景 · ${state.options.banned.length} 条禁用表达`;
+  $('#advanced-hint').textContent = counts;
+}
+
+/* --------------------------------------------------------- *
+ * 渲染：策略与 CTA
+ * --------------------------------------------------------- */
+
+function currentCount() {
+  return Math.min(20, Math.max(1, Number.parseInt($('#comment-count').value, 10) || 10));
+}
+
+function renderStrategy() {
+  const strength = state.options.strength;
+  $('#strength').value = String(strength);
+  $('#strength-value').textContent = Number(strength).toFixed(1);
+  $('#strength-note').classList.toggle('hidden', Number(strength) <= 8);
+  $('#style').value = state.options.style;
+  $('#length-mode').value = state.options.length;
+  updateCTA();
+}
+
+function updateCTA() {
+  const count = currentCount();
+  const button = $('#btn-generate');
+  button.textContent = `生成 ${count} 条评论`;
+  const hasCard = Boolean(state.factCard);
+  const confirmed = $('#confirm-facts').checked;
+  button.disabled = !(hasCard && confirmed);
+  $('#generate-hint').textContent = !hasCard
+    ? '生成前请先识别并核对事实卡'
+    : confirmed
+      ? '按规则先生成候选，再做事实、正面与去重筛选 · Ctrl + Enter 快捷生成'
+      : '请先在「事实卡复核」里勾选核对确认';
+}
+
+/* --------------------------------------------------------- *
+ * 渲染：评论结果
+ * --------------------------------------------------------- */
+
+function typeOf(item) {
+  const source = `${item.meta?.focus || ''} ${item.meta?.result || ''} ${item.text || ''}`;
+  for (const [pattern, label] of COMMENT_TYPE_RULES) {
+    if (pattern.test(source)) return label;
+  }
+  return '体验型';
+}
+
+function charBadgeClass(chars) {
+  if (chars >= 88 && chars <= 112) return 'is-long';
+  if (chars < 20) return 'is-warn';
+  return '';
+}
+
+let openMenuIndex = -1;
+
+function renderComments() {
+  const list = $('#review-list');
+  list.innerHTML = '';
+  const comments = state.comments;
+  $('#results-empty').classList.toggle('hidden', comments.length > 0);
+  $('#result-count').textContent = `${comments.length} 条`;
+
+  comments.forEach((item, index) => {
+    const li = document.createElement('li');
+    li.className = 'review-item';
+    if (openMenuIndex === index) li.classList.add('menu-open');
+
+    const no = document.createElement('div');
+    no.className = 'review-no';
+    no.textContent = String(index + 1).padStart(2, '0');
+    li.appendChild(no);
+
+    const main = document.createElement('div');
+    main.className = 'review-main';
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'review-text';
+    textarea.value = item.text;
+    textarea.rows = 1;
+    textarea.addEventListener('input', () => {
+      item.text = textarea.value;
+      item.chars = countChars(textarea.value);
+      autoGrow(textarea);
+      refreshMeta();
+      persist();
+    });
+    main.appendChild(textarea);
+
+    const meta = document.createElement('div');
+    meta.className = 'review-meta';
+    const charsSpan = document.createElement('span');
+    const typeSpan = document.createElement('span');
+    const emotionSpan = document.createElement('span');
+    const actions = document.createElement('div');
+    actions.className = 'review-actions';
+
+    actions.appendChild(makeAction('复制', () => copyText(item.text, '已复制该条评论')));
+    actions.appendChild(makeAction('重新生成', () => regenerateOne(index)));
+    actions.appendChild(
+      makeAction('•••', (event) => {
+        event.stopPropagation();
+        openMenuIndex = openMenuIndex === index ? -1 : index;
+        renderComments();
+      }, 'action-btn menu-trigger'),
+    );
+    meta.append(charsSpan, dot(), typeSpan, dot(), emotionSpan, actions);
+    main.appendChild(meta);
+
+    if (openMenuIndex === index) {
+      const menu = document.createElement('div');
+      menu.className = 'review-menu';
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.textContent = '编辑';
+      edit.addEventListener('click', () => {
+        openMenuIndex = -1;
+        renderComments();
+        const target = list.querySelectorAll('.review-text')[index];
+        target?.focus();
+      });
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.textContent = '复制';
+      copy.addEventListener('click', () => {
+        openMenuIndex = -1;
+        renderComments();
+        copyText(item.text, '已复制该条评论');
+      });
+      const regen = document.createElement('button');
+      regen.type = 'button';
+      regen.textContent = '重新生成';
+      regen.addEventListener('click', () => {
+        openMenuIndex = -1;
+        regenerateOne(index);
+      });
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'danger';
+      del.textContent = '删除';
+      del.addEventListener('click', () => {
+        openMenuIndex = -1;
+        deleteComment(index);
+      });
+      menu.append(edit, copy, regen, del);
+      main.appendChild(menu);
+    }
+
+    function refreshMeta() {
+      const chars = countChars(textarea.value);
+      charsSpan.textContent = `${chars} 字`;
+      charsSpan.className = `meta-chars ${charBadgeClass(chars)}`;
+      typeSpan.textContent = typeOf({ ...item, text: textarea.value });
+      emotionSpan.textContent = item.meta?.emotion || '明确满意';
+      autoGrow(textarea);
+    }
+
+    li.appendChild(main);
+    list.appendChild(li);
+    // 必须在插入 DOM 之后再量高度，否则 textarea 会裁掉第二行
+    refreshMeta();
+  });
+
+  requestAnimationFrame(() => {
+    list.querySelectorAll('.review-text').forEach(autoGrow);
+  });
+}
+
+function dot() {
+  const span = document.createElement('span');
+  span.className = 'meta-dot';
+  span.textContent = '·';
+  return span;
+}
+
+function makeAction(label, onClick, className = 'action-btn') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function deleteComment(index) {
+  const removed = state.comments[index];
+  state.comments.splice(index, 1);
+  renderComments();
+  persist();
+  toast(`已删除第 ${index + 1} 条评论`, {
+    actionLabel: '撤销',
+    onAction: () => {
+      state.comments.splice(index, 0, removed);
+      renderComments();
+      persist();
+      toast('已恢复');
+    },
+  });
+}
+
+/* --------------------------------------------------------- *
+ * 渲染：自检报告
+ * --------------------------------------------------------- */
+
+function renderReport() {
+  const body = $('#report-body');
+  const report = state.report;
+  if (!report) {
+    body.innerHTML = '<p class="foot-note">本次还没有生成记录。</p>';
+    $('#report-hint').textContent = '程序自检，不等于独立盲测';
+    $('#report-box').classList.add('hidden');
+    return;
+  }
+  $('#report-box').classList.remove('hidden');
+  const lines = [
+    `模型：${report.model || '未记录'}　生成时间：${report.generatedAt || ''}　耗时：${(report.elapsedMs / 1000).toFixed(1)} 秒`,
+    `候选 ${report.candidateCount} 条 → 通过事实与正面检查 ${report.passed} 条 → 语义去重后保留 ${report.selected} 条`,
+    `篇幅分布：约 100 字长评 ${report.length.long} 条 ｜ 主体 55–85 字 ${report.length.main} 条 ｜ 短评 ${report.length.short} 条`,
+    `情绪分布：${Object.entries(report.emotions || {}).map(([k, v]) => `${k} ${v}`).join('，') || '—'}`,
+    `事实依据：${report.factSummary}`,
+    `需要人工复核：${report.warnings?.length ? report.warnings.map((w) => `第 ${w.index} 条 ${w.type}（${w.detail}）`).join('；') : '无'}`,
+  ];
+  if (report.preferenceNote) {
+    lines.push(`本次生效的评论策略：${String(report.preferenceNote).replace(/\n/g, ' ')}`);
+  }
+  if (report.focusOveruse?.length) {
+    lines.push(`同一卖点条数偏多（事实较少时属正常）：${report.focusOveruse.map((f) => `${f.focus}×${f.times}`).join('、')}`);
+  }
+  lines.push('说明：以上为一轮生成程序自检结果，不等于独立盲测、用户认可或跨品类验收。');
+
+  const html = [`<pre>${escapeHtml(lines.join('\n'))}</pre>`];
+  if (report.rejected?.length) {
+    html.push('<details class="reject-list"><summary>被筛掉的候选（节选 20 条）</summary><ul>');
+    report.rejected.slice(0, 20).forEach((item) => {
+      html.push(`<li><strong>${escapeHtml(item.stage)}</strong>：${escapeHtml(item.reason)}<br />${escapeHtml(String(item.text).slice(0, 80))}</li>`);
+    });
+    html.push('</ul></details>');
+  }
+  body.innerHTML = html.join('');
+  $('#report-hint').textContent = `候选 ${report.candidateCount} 条 · 自检不等于盲测`;
+}
+
+/* --------------------------------------------------------- *
+ * 历史记录
+ * --------------------------------------------------------- */
+
+function saveHistory() {
+  if (!state.comments.length) return;
+  const snapshot = {
+    id: Date.now(),
+    at: new Date().toLocaleString('zh-CN', { hour12: false }),
+    productName: state.factCard?.产品名称 || state.productName || '未命名产品',
+    count: state.comments.length,
+    comments: state.comments.map((item) => ({ ...item })),
+    factCard: state.factCard ? JSON.parse(JSON.stringify(state.factCard)) : null,
+    report: state.report,
+    generation: { ...state.generation },
+    options: { ...state.options },
+  };
+  state.history = [snapshot, ...state.history].slice(0, 20);
+  renderHistory();
+  persist();
+}
+
+function renderHistory() {
+  const list = $('#history-list');
+  list.innerHTML = '';
+  if (!state.history.length) {
+    list.innerHTML = '<p class="foot-note">还没有历史记录。生成一次评论后会自动存档。</p>';
+    return;
+  }
+  state.history.forEach((snapshot) => {
+    const item = document.createElement('div');
+    item.className = 'history-item';
+    const info = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'history-title';
+    title.textContent = snapshot.productName;
+    const meta = document.createElement('div');
+    meta.className = 'history-meta';
+    meta.textContent = `${snapshot.at} · ${snapshot.count} 条 · ${snapshot.generation?.model || ''}`;
+    info.append(title, meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'history-actions';
+    const restore = document.createElement('button');
+    restore.type = 'button';
+    restore.className = 'btn btn-ghost btn-sm';
+    restore.textContent = '载入';
+    restore.addEventListener('click', () => restoreHistory(snapshot));
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn btn-ghost btn-sm';
+    remove.textContent = '删除';
+    remove.addEventListener('click', () => {
+      state.history = state.history.filter((entry) => entry.id !== snapshot.id);
+      renderHistory();
+      persist();
+    });
+    actions.append(restore, remove);
+    item.append(info, actions);
+    list.appendChild(item);
+  });
+}
+
+function currentSnapshot() {
+  return {
+    productName: state.productName,
+    productSpec: state.productSpec,
+    sellingPoints: [...state.sellingPoints],
+    factCard: state.factCard ? JSON.parse(JSON.stringify(state.factCard)) : null,
+    comments: state.comments.map((item) => ({ ...item })),
+    report: state.report,
+    generation: { ...state.generation },
+    options: { ...state.options },
+  };
+}
+
+function applySnapshot(snapshot) {
+  state.productName = snapshot.productName || '';
+  state.productSpec = snapshot.productSpec || '';
+  state.sellingPoints = Array.isArray(snapshot.sellingPoints) ? [...snapshot.sellingPoints] : [];
+  state.factCard = snapshot.factCard || null;
+  state.comments = Array.isArray(snapshot.comments) ? snapshot.comments.map((item) => ({ ...item })) : [];
+  state.report = snapshot.report || null;
+  state.generation = snapshot.generation || { model: '', generatedAt: '', productName: '' };
+  if (snapshot.options) state.options = { ...state.options, ...snapshot.options };
+  $('#product-name').value = state.productName;
+  $('#product-spec').value = state.productSpec;
+  renderFactCard();
+  renderStrategy();
+  renderComments();
+  renderReport();
+  updateCTA();
+  persist();
+}
+
+function restoreHistory(snapshot) {
+  const previous = currentSnapshot();
+  applySnapshot(snapshot);
+  $('#history-drawer').classList.add('hidden');
+  toast('已载入历史记录', {
+    actionLabel: '撤销',
+    onAction: () => {
+      applySnapshot(previous);
+      toast('已恢复到载入前的状态');
+    },
+  });
+}
+
+/* --------------------------------------------------------- *
+ * 产品资料与事实卡流程
+ * --------------------------------------------------------- */
+
+function addFiles(fileList) {
+  const files = Array.from(fileList || []).filter((file) => file.type.startsWith('image/'));
+  if (!files.length) return;
+  if (state.images.length + files.length > 8) toast('最多 8 张图片，多余的已忽略', { bad: true });
+  files.slice(0, Math.max(0, 8 - state.images.length)).forEach((file) => {
+    if (file.size > 12 * 1024 * 1024) {
+      toast(`${file.name} 超过 12MB，已跳过`, { bad: true });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      state.images.push({ name: file.name, dataUrl: String(reader.result) });
+      renderThumbs();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/** 产品规格会作为一行资料一起送进事实卡提取 */
+function sellingPointsPayload() {
+  const lines = [...state.sellingPoints];
+  if (state.productSpec.trim()) lines.unshift(`产品规格：${state.productSpec.trim()}`);
+  return lines.join('\n');
+}
+
+async function extractFacts() {
+  const productName = $('#product-name').value.trim();
+  const sellingPoints = sellingPointsPayload();
+  if (!productName && !sellingPoints && !state.images.length) {
+    toast('请至少填写产品名称、卖点或上传图片', { bad: true });
+    return;
+  }
+  busy(true, '正在识读产品资料…', state.images.length ? `${state.images.length} 张图片` : '文字输入');
+  try {
+    const data = await api('/api/facts', {
+      body: { productName, sellingPoints, images: state.images.map((image) => ({ name: image.name, dataUrl: image.dataUrl })) },
+    });
+    state.factCard = normalizeFactCard(data.factCard);
+    state.extraction = data.extraction;
+    if (!state.factCard.产品名称 && productName) state.factCard.产品名称 = productName;
+    $('#confirm-facts').checked = false;
+    $('#facts-toggle').open = true;
+    renderFactCard();
+    $('#extract-note').textContent = data.extraction?.note || '';
+    toast('事实卡已生成，请核对后勾选确认');
+  } catch (error) {
+    toast(error.message, { bad: true });
+  } finally {
+    busy(false);
+  }
+}
+
+/* --------------------------------------------------------- *
+ * 生成与导出
+ * --------------------------------------------------------- */
+
+async function generateComments() {
+  if (!state.factCard) return toast('请先识别并核对事实卡', { bad: true });
+  if (!$('#confirm-facts').checked) return toast('请先在「事实卡复核」里勾选核对确认', { bad: true });
+  const count = currentCount();
+  busy(true, `正在生成 ${count} 条候选评论…`, '先生成候选，再做事实、正面与去重筛选');
+  try {
+    const data = await api('/api/comments', {
+      body: { factCard: state.factCard, count, options: state.options },
+    });
+    state.comments = (data.comments || []).map((item) => ({ ...item }));
+    state.report = data.report;
+    state.generation = {
+      model: data.model,
+      generatedAt: data.generatedAt,
+      productName: state.factCard.产品名称 || state.productName,
+    };
+    renderComments();
+    renderReport();
+    saveHistory();
+    persist();
+    if (state.comments.length < count) {
+      toast(`本次只产出 ${state.comments.length}/${count} 条合规评论，可看自检报告`, { bad: true });
+    } else {
+      toast(`已生成 ${state.comments.length} 条模拟评论`);
+    }
+  } catch (error) {
+    toast(error.message, { bad: true });
+  } finally {
+    busy(false);
+  }
+}
+
+async function regenerateOne(index) {
+  const current = state.comments[index];
+  if (!state.factCard || !current) return;
+  const others = state.comments.filter((_, i) => i !== index);
+  const chars = countChars(current.text);
+  const targetLength = chars >= 88 ? '90–110 字（高度赞扬长评，全正面）' : chars >= 50 ? '55–85 字' : '20–50 字（短评）';
+  busy(true, `正在重新生成第 ${index + 1} 条…`, '只重写这一条，其余不动');
+  try {
+    const data = await api('/api/comments/regenerate', {
+      body: {
+        factCard: state.factCard,
+        index: index + 1,
+        targetLength,
+        targetEmotion: current.meta?.emotion || '明确满意',
+        currentText: current.text,
+        usedObservations: others.map((item) => `${item.meta?.focus || ''}|${item.meta?.result || ''}|${item.meta?.action || ''}`).filter(Boolean),
+        avoidTexts: others.map((item) => item.text),
+      },
+    });
+    state.comments[index] = data.comment;
+    openMenuIndex = -1;
+    renderComments();
+    persist();
+    if (data.warnings?.length) {
+      toast(`已重新生成，需复核：${data.warnings.map((w) => w.type).join('、')}`, { bad: true });
+    } else {
+      toast('已重新生成这一条');
+    }
+  } catch (error) {
+    toast(error.message, { bad: true });
+  } finally {
+    busy(false);
   }
 }
 
@@ -658,17 +1065,18 @@ function exportPayload() {
 }
 
 async function exportMarkdown() {
-  if (!state.comments.length) return toast('还没有可导出的评论。', true);
+  if (!state.comments.length) return toast('还没有可导出的评论', { bad: true });
   try {
     const data = await api('/api/export/markdown', { body: exportPayload() });
     downloadBlob(new Blob([data.markdown], { type: 'text/markdown;charset=utf-8' }), data.filename);
-  } catch (err) {
-    toast(err.message, true);
+    toast(`已导出：${data.filename}`);
+  } catch (error) {
+    toast(error.message, { bad: true });
   }
 }
 
 async function exportExcel() {
-  if (!state.comments.length) return toast('还没有可导出的评论。', true);
+  if (!state.comments.length) return toast('还没有可导出的评论', { bad: true });
   try {
     const response = await fetch('/api/export/excel', {
       method: 'POST',
@@ -684,69 +1092,260 @@ async function exportExcel() {
     const match = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="([^"]+)"/i);
     const filename = match ? decodeURIComponent(match[1]) : '模拟评论.xlsx';
     downloadBlob(blob, filename);
-  } catch (err) {
-    toast(err.message, true);
+    toast(`已导出：${filename}`);
+  } catch (error) {
+    toast(error.message, { bad: true });
   }
 }
 
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename || 'download';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
-  toast(`已导出：${filename}`);
+/* --------------------------------------------------------- *
+ * 设置
+ * --------------------------------------------------------- */
+
+async function loadConfig() {
+  const data = await api('/api/config');
+  state.config = data;
+  const status = $('#model-status');
+  status.className = `model-status ${data.ready ? 'ok' : 'bad'}`;
+  status.innerHTML = '<span class="dot"></span>';
+  status.appendChild(document.createTextNode(data.ready ? `${data.model} · ${data.baseUrlHost}` : '模型未配置，点「设置」'));
+
+  $('#cfg-base-url').value = data.baseUrl || '';
+  $('#cfg-model').value = data.model || '';
+  $('#cfg-vision').value = data.visionMode || 'auto';
+  $('#cfg-temperature').value = data.temperature ?? 0.95;
+  $('#cfg-max-tokens').value = data.maxTokens ?? 32000;
+  $('#cfg-ocr-url').value = data.ocr?.baseUrl || '';
+  $('#cfg-ocr-model').value = data.ocr?.model || '';
+  $('#cfg-api-key').placeholder = data.apiKeyMasked ? `已配置：${data.apiKeyMasked}（留空保持不变）` : '粘贴你的接口密钥';
+
+  const sources = data.sources || {};
+  $('#config-source').textContent = [
+    `接口地址：${sources.baseUrl || '未知'}`,
+    `模型 ID：${sources.model || '未知'}`,
+    `密钥：${sources.apiKey || '未知'}`,
+    `本机 OCR：${data.localOcr?.ok ? `可用（${data.localOcr.language}）` : '不可用'}`,
+  ].join('　｜　');
 }
 
-/* ---------------- 本地暂存 ---------------- */
+async function saveSettings() {
+  $('#settings-status').textContent = '保存中…';
+  try {
+    await api('/api/config', {
+      body: {
+        baseUrl: $('#cfg-base-url').value,
+        model: $('#cfg-model').value,
+        apiKey: $('#cfg-api-key').value,
+        vision: $('#cfg-vision').value,
+        temperature: $('#cfg-temperature').value,
+        maxTokens: $('#cfg-max-tokens').value,
+        ocr: { baseUrl: $('#cfg-ocr-url').value, model: $('#cfg-ocr-model').value, apiKey: $('#cfg-ocr-key').value },
+      },
+    });
+    $('#cfg-api-key').value = '';
+    $('#cfg-ocr-key').value = '';
+    await loadConfig();
+    $('#settings-status').textContent = '已保存到服务端 config.json';
+    toast('设置已保存');
+  } catch (error) {
+    $('#settings-status').textContent = `保存失败：${error.message}`;
+    toast(error.message, { bad: true });
+  }
+}
+
+async function loadModels() {
+  const output = $('#test-output');
+  output.classList.remove('hidden');
+  output.textContent = '正在读取模型列表…';
+  try {
+    const data = await api('/api/config/models', {
+      body: { baseUrl: $('#cfg-base-url').value, apiKey: $('#cfg-api-key').value },
+    });
+    const options = $('#model-options');
+    options.innerHTML = '';
+    data.models.forEach((model) => {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.label = `${model.name || model.id}${model.inputModalities ? `（${model.inputModalities.join('/')}）` : ''}`;
+      options.appendChild(option);
+    });
+    output.textContent = data.models
+      .map((model) => `${model.id}${model.name ? ` — ${model.name}` : ''}${model.inputModalities ? `　输入：${model.inputModalities.join('、')}` : ''}`)
+      .join('\n');
+    $('#settings-status').textContent = `读取到 ${data.models.length} 个模型`;
+  } catch (error) {
+    output.textContent = `读取失败：${error.message}`;
+    $('#settings-status').textContent = '读取模型列表失败';
+  }
+}
+
+async function testConnection() {
+  const output = $('#test-output');
+  output.classList.remove('hidden');
+  output.textContent = '正在测试（会真实调用一次接口）…';
+  $('#settings-status').textContent = '测试中…';
+  try {
+    const data = await api('/api/config/test', { body: { includeVisionProbe: true } });
+    output.textContent = data.lines.join('\n');
+    $('#settings-status').textContent = data.ok ? '测试通过' : '测试未通过';
+  } catch (error) {
+    output.textContent = `测试失败：${error.message}`;
+    $('#settings-status').textContent = '测试失败';
+  }
+}
+
+/* --------------------------------------------------------- *
+ * 本地暂存
+ * --------------------------------------------------------- */
 
 function persist() {
   try {
     localStorage.setItem(
-      'buyer-review-studio',
+      STORAGE_KEY,
       JSON.stringify({
         productName: $('#product-name').value,
-        sellingPoints: $('#selling-points').value,
+        productSpec: $('#product-spec').value,
+        sellingPoints: state.sellingPoints,
         factCard: state.factCard,
         comments: state.comments,
         report: state.report,
         generation: state.generation,
+        options: state.options,
+        history: state.history,
         count: $('#comment-count').value,
       }),
     );
   } catch {
-    /* 超出配额时忽略 */
+    /* 配额不足时忽略 */
   }
 }
 
 function restore() {
+  let raw = null;
   try {
-    const raw = localStorage.getItem('buyer-review-studio');
-    if (!raw) return;
+    raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('buyer-review-studio');
+  } catch {
+    return;
+  }
+  if (!raw) return;
+  try {
     const data = JSON.parse(raw);
-    $('#product-name').value = data.productName || '';
-    $('#selling-points').value = data.sellingPoints || '';
-    $('#comment-count').value = data.count || 10;
+    state.productName = data.productName || '';
+    state.productSpec = data.productSpec || '';
+    state.sellingPoints = Array.isArray(data.sellingPoints)
+      ? data.sellingPoints
+      : String(data.sellingPoints || '').split('\n').map((line) => line.trim()).filter(Boolean);
+    state.options = { ...state.options, ...(data.options || {}) };
+    state.history = Array.isArray(data.history) ? data.history : [];
+    $('#product-name').value = state.productName;
+    $('#product-spec').value = state.productSpec;
+    if (data.count) $('#comment-count').value = data.count;
     if (data.factCard) {
       state.factCard = normalizeFactCard(data.factCard);
       state.comments = Array.isArray(data.comments) ? data.comments : [];
       state.report = data.report || null;
       state.generation = data.generation || { model: '', generatedAt: '', productName: '' };
-      renderFactCard();
-      renderComments();
-      renderReport();
     }
   } catch {
-    /* 本地暂存损坏时忽略 */
+    /* 本地数据损坏时忽略 */
   }
 }
 
-/* ---------------- 事件绑定 ---------------- */
+/* --------------------------------------------------------- *
+ * 事件绑定
+ * --------------------------------------------------------- */
 
 function bindEvents() {
+  // 产品信息
+  $('#btn-choose-file').addEventListener('click', () => $('#file-input').click());
+  $('#file-input').addEventListener('change', (event) => {
+    addFiles(event.target.files);
+    event.target.value = '';
+  });
+  $('#product-name').addEventListener('input', (event) => {
+    state.productName = event.target.value;
+    persist();
+  });
+  $('#product-spec').addEventListener('input', (event) => {
+    state.productSpec = event.target.value;
+    persist();
+  });
+  document.addEventListener('paste', (event) => {
+    const files = Array.from(event.clipboardData?.files || []);
+    if (files.length) addFiles(files);
+  });
+
+  // 事实卡
+  $('#btn-extract').addEventListener('click', extractFacts);
+  $('#fact-name').addEventListener('input', (event) => {
+    if (state.factCard) state.factCard.产品名称 = event.target.value;
+    persist();
+  });
+  $('#fact-category').addEventListener('input', (event) => {
+    if (state.factCard) state.factCard.品类 = event.target.value;
+    persist();
+  });
+  $('#confirm-facts').addEventListener('change', () => {
+    updateCTA();
+    persist();
+  });
+
+  // 策略
+  const clampCount = (value) => Math.min(20, Math.max(1, value));
+  $('#count-minus').addEventListener('click', () => {
+    $('#comment-count').value = clampCount(currentCount() - 1);
+    updateCTA();
+    persist();
+  });
+  $('#count-plus').addEventListener('click', () => {
+    $('#comment-count').value = clampCount(currentCount() + 1);
+    updateCTA();
+    persist();
+  });
+  $('#comment-count').addEventListener('input', () => {
+    updateCTA();
+    persist();
+  });
+  $('#strength').addEventListener('input', (event) => {
+    state.options.strength = Number(event.target.value);
+    renderStrategy();
+    persist();
+  });
+  $('#style').addEventListener('change', (event) => {
+    state.options.style = event.target.value;
+    persist();
+  });
+  $('#length-mode').addEventListener('change', (event) => {
+    state.options.length = event.target.value;
+    persist();
+  });
+
+  // 生成
+  $('#btn-generate').addEventListener('click', generateComments);
+  $('#btn-regenerate-all').addEventListener('click', generateComments);
+  document.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      if (!$('#btn-generate').disabled) generateComments();
+    }
+  });
+
+  // 结果操作
+  $('#btn-copy-all').addEventListener('click', () => {
+    if (!state.comments.length) return toast('还没有可复制的评论', { bad: true });
+    copyText(state.comments.map((item, index) => `${index + 1}. ${item.text}`).join('\n\n'), '已复制全部评论');
+  });
+  $('#btn-export-md').addEventListener('click', exportMarkdown);
+  $('#btn-export-xlsx').addEventListener('click', exportExcel);
+  document.addEventListener('click', (event) => {
+    if (openMenuIndex < 0) return;
+    if (!event.target.closest('.review-menu') && !event.target.closest('.menu-trigger')) {
+      openMenuIndex = -1;
+      renderComments();
+    }
+  });
+
+  // 设置
   $('#btn-open-settings').addEventListener('click', () => $('#settings-modal').classList.remove('hidden'));
   $('#btn-close-settings').addEventListener('click', () => $('#settings-modal').classList.add('hidden'));
   $('#settings-modal').addEventListener('click', (event) => {
@@ -756,79 +1355,43 @@ function bindEvents() {
   $('#btn-test-config').addEventListener('click', testConnection);
   $('#btn-load-models').addEventListener('click', loadModels);
 
-  $('#btn-choose-file').addEventListener('click', () => $('#file-input').click());
-  $('#file-input').addEventListener('change', (event) => {
-    addFiles(event.target.files);
-    event.target.value = '';
+  // 历史记录
+  $('#btn-history').addEventListener('click', () => {
+    renderHistory();
+    $('#history-drawer').classList.remove('hidden');
   });
-
-  const dropzone = $('#dropzone');
-  ['dragenter', 'dragover'].forEach((type) =>
-    dropzone.addEventListener(type, (event) => {
-      event.preventDefault();
-      dropzone.classList.add('drag');
-    }),
-  );
-  ['dragleave', 'drop'].forEach((type) =>
-    dropzone.addEventListener(type, (event) => {
-      event.preventDefault();
-      dropzone.classList.remove('drag');
-    }),
-  );
-  dropzone.addEventListener('drop', (event) => addFiles(event.dataTransfer?.files));
-
-  document.addEventListener('paste', (event) => {
-    const files = Array.from(event.clipboardData?.files || []);
-    if (files.length) addFiles(files);
-  });
-
-  $('#btn-extract').addEventListener('click', extractFacts);
-  $('#btn-generate').addEventListener('click', generateComments);
-  $('#confirm-facts').addEventListener('change', updateGenerateAvailability);
-  $('#fact-name').addEventListener('input', (event) => {
-    if (state.factCard) state.factCard.产品名称 = event.target.value;
-    persist();
-  });
-  $('#fact-category').addEventListener('input', (event) => {
-    if (state.factCard) state.factCard.品类 = event.target.value;
-    persist();
-  });
-  $('#product-name').addEventListener('input', persist);
-  $('#selling-points').addEventListener('input', persist);
-  $('#comment-count').addEventListener('input', persist);
-
-  $('#btn-copy-all').addEventListener('click', () => {
-    if (!state.comments.length) return toast('还没有可复制的评论。', true);
-    const text = state.comments.map((item, index) => `${index + 1}. ${item.text}`).join('\n\n');
-    copyText(text, '已复制全部评论');
-  });
-  $('#btn-export-md').addEventListener('click', exportMarkdown);
-  $('#btn-export-xlsx').addEventListener('click', exportExcel);
-  $('#toggle-diagnostics').addEventListener('change', (event) => {
-    state.showDiagnostics = event.target.checked;
-    $('#report-box').classList.toggle('hidden', !state.showDiagnostics);
-    renderComments();
+  $('#btn-close-history').addEventListener('click', () => $('#history-drawer').classList.add('hidden'));
+  $('#history-drawer').addEventListener('click', (event) => {
+    if (event.target === $('#history-drawer')) $('#history-drawer').classList.add('hidden');
   });
 }
+
+/* --------------------------------------------------------- *
+ * 启动
+ * --------------------------------------------------------- */
 
 async function init() {
   bindEvents();
   restore();
   renderThumbs();
-  updateGenerateAvailability();
+  renderStrategy();
+  renderFactCard();
+  renderComments();
+  renderReport();
+  renderHistory();
+  updateCTA();
   try {
     await loadConfig();
-  } catch (err) {
-    $('#model-status').textContent = `读取配置失败：${err.message}`;
+  } catch (error) {
     $('#model-status').className = 'model-status bad';
+    $('#model-status').innerHTML = `<span class="dot"></span>读取配置失败：${escapeHtml(error.message)}`;
   }
   try {
     const rules = await api('/api/rules');
-    if (rules?.name) $('#rules-pill').textContent = `规则蓝本 ${rules.name}`;
+    if (rules?.name) $('#rules-pill').textContent = `规则 ${rules.name}`;
   } catch {
     /* 忽略 */
   }
-  $('#report-box').classList.add('hidden');
 }
 
 init();

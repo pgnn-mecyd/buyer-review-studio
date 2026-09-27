@@ -435,6 +435,39 @@ const BATCH_FOCUS = [
   '本批重点覆盖前面尚未使用的已知优点，换用不同的观察动作与开头方式，避免与已有候选重复。',
 ];
 
+/**
+ * 把左侧「评论策略」里的用户偏好翻译成提示词约束。
+ * 注意：这些只是写作偏好，不放开事实边界，也不改变规则蓝本的硬要求。
+ */
+function buildPreferenceNote(options) {
+  if (!options || typeof options !== 'object') return '';
+  const lines = [];
+  const strength = Number.parseFloat(options.strength);
+  if (Number.isFinite(strength)) {
+    const clamped = Math.min(Math.max(strength, 6.5), 8.5);
+    lines.push(
+      `整批表达力度目标：${clamped.toFixed(1)}/10（规则蓝本默认区间 7.5–8）。力度调高只允许更明确、更具体的肯定，禁止编造事实、绝对化表达和医疗化表述。`,
+    );
+  }
+  if (options.style && options.style !== '真实买家感') {
+    lines.push(`整批情绪侧重：${options.style}。仍然全部正面，并继续打散顺序，不给第 1–10 条固定人格岗位。`);
+  }
+  if (options.length === '偏短') {
+    lines.push('篇幅偏好：整体偏短，主体以 35–70 字为主，但仍要保留 1 条约 90–110 字的高度赞扬长评。');
+  } else if (options.length === '偏长') {
+    lines.push('篇幅偏好：整体偏长，主体以 65–95 字为主，并保留 1–2 条约 90–110 字长评；不要靠套话或重复夸词凑字数。');
+  }
+  const structure = Array.isArray(options.structure) ? options.structure.filter(Boolean) : [];
+  if (structure.length && structure.length < 6) {
+    lines.push(`本批只用这些表达结构：${structure.join('、')}；其余结构不要使用。`);
+  }
+  const banned = Array.isArray(options.banned) ? options.banned.filter(Boolean).slice(0, 40) : [];
+  if (banned.length) {
+    lines.push(`用户额外要求禁止出现的表达（一律不得出现）：${banned.join('、')}。`);
+  }
+  return lines.join('\n');
+}
+
 function sumUsage(list) {
   const result = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   for (const usage of list) {
@@ -446,7 +479,7 @@ function sumUsage(list) {
   return result;
 }
 
-async function generateComments(config, { factCard, count, onProgress }) {
+async function generateComments(config, { factCard, count, options, onProgress }) {
   const started = Date.now();
   const pool = [];
   let selection = null;
@@ -456,6 +489,7 @@ async function generateComments(config, { factCard, count, onProgress }) {
   let usedRepair = false;
   // 推理型模型会先消耗大量推理 token，单次预算给足才不会出现"只有推理没有正文"
   const perCallMaxTokens = Math.max(12000, Math.min(120000, config.maxTokens || 32000));
+  const preferenceNote = buildPreferenceNote(options);
 
   for (let round = 1; round <= 3; round += 1) {
     rounds = round;
@@ -464,7 +498,7 @@ async function generateComments(config, { factCard, count, onProgress }) {
     const askTotal = round === 1 ? Math.max(candidatePlan(count), count) : Math.max(missing * 3, 8);
     const batchCount = askTotal >= 12 ? 2 : 1;
     const perBatch = Math.ceil(askTotal / batchCount);
-    const extraNote = round === 1 ? '' : usedObservationNote(selection);
+    const extraNote = [preferenceNote, round === 1 ? '' : usedObservationNote(selection)].filter(Boolean).join('\n\n');
 
     if (onProgress) onProgress(`第 ${round} 轮：分 ${batchCount} 批并发生成候选`);
     const jobs = [];
@@ -537,6 +571,7 @@ async function generateComments(config, { factCard, count, onProgress }) {
     warnings,
     rejected: selection.rejected.map((item) => ({ stage: item.stage, reason: item.reason, text: item.text })),
     factSummary: factSummaryOf(factCard),
+    preferenceNote,
     usedRepair,
     usage: sumUsage(usages),
   };
@@ -675,7 +710,7 @@ async function handleComments(res, body) {
     return;
   }
   const count = Math.min(20, Math.max(1, Number.parseInt(body.count, 10) || 10));
-  const result = await generateComments(config, { factCard, count });
+  const result = await generateComments(config, { factCard, count, options: body.options });
   sendJson(res, 200, result);
 }
 

@@ -82,6 +82,45 @@ const FILLER_WORDS = [
   '真的', '明显', '非常', '特别', '超级', '总体来说', '不得不说', '最让我惊喜的是', '值得一提的是',
 ];
 
+/** 常见夸词：同一条里反复堆叠就是凑字数，要降权或淘汰 */
+const PRAISE_WORDS = [
+  '清爽', '舒服', '方便', '顺手', '省事', '干净', '好用', '满意', '自然', '轻松',
+  '简单', '合适', '顺滑', '细腻', '柔软', '轻便', '省心', '舒服多了',
+];
+
+/**
+ * 检查「夸词堆砌」与「短句堆叠」：规则蓝本要求不要靠重复同一夸词凑长。
+ * 同夸词 ≥3 次、或小句极短且堆叠时判为违规；轻度重复降权处理。
+ */
+function checkRepetition(text) {
+  const violations = [];
+  const warnings = [];
+  const repeated = [];
+  for (const word of PRAISE_WORDS) {
+    const count = (text.match(new RegExp(word, 'g')) || []).length;
+    if (count >= 2) repeated.push({ word, count });
+  }
+  const heavy = repeated.filter((item) => item.count >= 3);
+  if (heavy.length) {
+    violations.push({ type: '同一夸词重复堆叠', detail: heavy.map((item) => `${item.word}×${item.count}`).join('、') });
+  }
+
+  const clauses = text.split(/[，。！？；、]/).filter((item) => item.trim());
+  const chars = countChars(text);
+  const average = clauses.length ? chars / clauses.length : chars;
+  if (clauses.length >= 6 && average < 5.5) {
+    violations.push({ type: '短句堆叠、信息密度低', detail: `${clauses.length} 个小句，平均 ${average.toFixed(1)} 字` });
+  } else if (clauses.length >= 6 && average < 8) {
+    warnings.push({ type: '句式偏碎、夸词偏多', detail: `${clauses.length} 个小句，平均 ${average.toFixed(1)} 字`, weight: 6 });
+  }
+
+  const mild = repeated.filter((item) => item.count === 2).map((item) => item.word);
+  if (mild.length >= 2) {
+    warnings.push({ type: '同一批夸词重复偏多', detail: mild.join('、'), weight: 4 });
+  }
+  return { violations, warnings };
+}
+
 function normalizeText(text) {
   return String(text || '')
     .replace(/\s+/g, '')
@@ -246,9 +285,10 @@ function evaluateCandidate(candidate, factCard) {
   };
   const factResult = checkFacts(text, factCard);
   const positiveResult = checkPositive(text);
+  const repetitionResult = checkRepetition(text);
   const chars = countChars(text);
-  const violations = [...factResult.violations, ...positiveResult.violations];
-  const warnings = [...factResult.warnings, ...positiveResult.warnings];
+  const violations = [...factResult.violations, ...positiveResult.violations, ...repetitionResult.violations];
+  const warnings = [...factResult.warnings, ...positiveResult.warnings, ...repetitionResult.warnings];
   if (chars < 12) violations.push({ type: '文本过短或为空', detail: `${chars} 字` });
   if (/[#*`]|emoji|😀|😂|❤️|✨|🔥/.test(text) || /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text)) {
     violations.push({ type: '出现表情或标记符号', detail: '需去掉 emoji/符号' });
@@ -345,7 +385,7 @@ function selectComments(rawCandidates, { factCard, count = 10, seed = Date.now()
     for (const item of pool) {
       if (chosen.includes(item)) continue;
       let score = 0;
-      score -= item.warnings.length * 2.2;
+      score -= item.warnings.reduce((sum, warning) => sum + (warning.weight || 2.2), 0);
       if ((focusCount.get(item.meta.focus) || 0) >= focusCap) score -= 14;
       if ((resultCount.get(item.meta.result) || 0) >= focusCap) score -= 9;
       const fillerPenalty = item.fillers.reduce((sum, word) => sum + (fillerCount.get(word) || 0) * 3, 0);
