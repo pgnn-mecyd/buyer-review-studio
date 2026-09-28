@@ -127,83 +127,23 @@
           </section>
 
           <section class="card" id="card-facts">
-            <details class="section-toggle" id="facts-toggle">
-              <summary class="card-head as-summary">
-                <h2>事实卡复核</h2>
-                <span class="summary-tail">
-                  <span class="card-hint" id="facts-summary">尚未生成</span>
-                  <span class="chevron" aria-hidden="true">›</span>
-                </span>
-              </summary>
-              <div class="toggle-body">
-                <div id="facts-empty" class="empty">填写产品信息后，点上方按钮识别并生成事实卡。</div>
-                <div id="facts-editor" class="hidden">
-                  <div class="fact-meta">
-                    <div class="field">
-                      <label for="fact-name">产品名称</label>
-                      <input id="fact-name" type="text" />
-                    </div>
-                    <div class="field">
-                      <label for="fact-category">品类</label>
-                      <input id="fact-category" type="text" />
-                    </div>
-                  </div>
-                  <div id="fact-sections"></div>
-                  <label class="checkline">
-                    <input type="checkbox" id="confirm-facts" />
-                    <span>我已核对事实卡：写进评论的信息都真实存在，待确认的内容不参与生成。</span>
-                  </label>
-                </div>
-              </div>
-            </details>
+            <button class="module-open" id="btn-open-facts" type="button">
+              <span class="module-title">事实卡复核</span>
+              <span class="module-tail">
+                <span class="card-hint" id="facts-summary">尚未生成</span>
+                <span class="chevron" aria-hidden="true">›</span>
+              </span>
+            </button>
           </section>
 
           <section class="card" id="card-advanced">
-            <details class="accordion" id="advanced">
-              <summary class="card-head as-summary">
-                <h2>高级设置</h2>
-                <span class="summary-tail">
-                  <span class="card-hint" id="advanced-hint">低频参数</span>
-                  <span class="chevron" aria-hidden="true">›</span>
-                </span>
-              </summary>
-              <div class="accordion-body">
-                <div class="setting-row">
-                  <span class="setting-label">生成语言</span>
-                  <select class="select-inline" id="language">
-                    <option value="中文">中文</option>
-                  </select>
-                </div>
-
-                <div class="field">
-                  <label>表达结构<span class="label-note">至少保留 1 项</span></label>
-                  <div class="tags" id="tags-structure"></div>
-                </div>
-                <div class="field">
-                  <label>使用场景<span class="label-note">来自事实卡</span></label>
-                  <div class="tags" id="tags-scene"></div>
-                </div>
-                <div class="field">
-                  <label>功效关键词<span class="label-note">等同事实卡的「允许表达的结果」</span></label>
-                  <div class="tags" id="tags-effect"></div>
-                </div>
-                <div class="field">
-                  <label>禁用表达<span class="label-note">用户指定的词一律不出现</span></label>
-                  <div class="tags" id="tags-banned"></div>
-                </div>
-                <div class="field">
-                  <label>事实卡禁止项<span class="label-note">只读</span></label>
-                  <div class="chips chips-muted" id="chips-forbidden"></div>
-                </div>
-                <div class="meta-line">
-                  <span>长度分布</span>
-                  <span class="meta-value">自适应：55–85 字为主 · 1–2 条约 100 字 · 少量短评</span>
-                </div>
-                <p class="foot-note prompt-hint">
-                  <button type="button" class="btn-link" id="btn-prompt-inline">查看本次提示词与规则原文</button>
-                </p>
-              </div>
-            </details>
+            <button class="module-open" id="btn-open-advanced" type="button">
+              <span class="module-title">高级设置</span>
+              <span class="module-tail">
+                <span class="card-hint" id="advanced-hint">低频参数</span>
+                <span class="chevron" aria-hidden="true">›</span>
+              </span>
+            </button>
           </section>
           </div><!-- /config-row -->
 
@@ -265,6 +205,84 @@
     </main>
 
     <!-- 提示词 -->
+    <!-- 事实卡复核（二层窗口） -->
+    <div class="modal hidden" id="facts-modal">
+      <div class="modal-panel">
+        <div class="modal-head">
+          <h2>事实卡复核</h2>
+          <button class="btn btn-ghost btn-sm" id="btn-close-facts">关闭</button>
+        </div>
+        <p class="foot-note">识别不清的内容放在「待确认」，不会写进评论；生成评论前请先勾选确认。</p>
+        <div class="modal-body">
+          <div id="facts-empty" class="empty">填写产品信息后，点上方「识别图片 · 生成事实卡」。</div>
+          <div id="facts-editor" class="hidden">
+            <div class="fact-meta">
+              <div class="field">
+                <label for="fact-name">产品名称</label>
+                <input id="fact-name" type="text" />
+              </div>
+              <div class="field">
+                <label for="fact-category">品类</label>
+                <input id="fact-category" type="text" />
+              </div>
+            </div>
+            <div id="fact-sections"></div>
+            <label class="checkline">
+              <input type="checkbox" id="confirm-facts" />
+              <span>我已核对事实卡：写进评论的信息都真实存在，待确认的内容不参与生成。</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 高级设置（二层窗口） -->
+    <div class="modal hidden" id="advanced-modal">
+      <div class="modal-panel">
+        <div class="modal-head">
+          <h2>高级设置</h2>
+          <button class="btn btn-ghost btn-sm" id="btn-close-advanced">关闭</button>
+        </div>
+        <p class="foot-note">低频参数，平时不用改；调整后会作为写作偏好传给模型，不会放宽事实边界。</p>
+        <div class="modal-body accordion-body">
+          <div class="setting-row">
+            <span class="setting-label">生成语言</span>
+            <select class="select-inline" id="language">
+              <option value="中文">中文</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>表达结构<span class="label-note">至少保留 1 项</span></label>
+            <div class="tags" id="tags-structure"></div>
+          </div>
+          <div class="field">
+            <label>使用场景<span class="label-note">来自事实卡</span></label>
+            <div class="tags" id="tags-scene"></div>
+          </div>
+          <div class="field">
+            <label>功效关键词<span class="label-note">等同事实卡的「允许表达的结果」</span></label>
+            <div class="tags" id="tags-effect"></div>
+          </div>
+          <div class="field">
+            <label>禁用表达<span class="label-note">用户指定的词一律不出现</span></label>
+            <div class="tags" id="tags-banned"></div>
+          </div>
+          <div class="field">
+            <label>事实卡禁止项<span class="label-note">只读</span></label>
+            <div class="chips chips-muted" id="chips-forbidden"></div>
+          </div>
+          <div class="meta-line">
+            <span>长度分布</span>
+            <span class="meta-value">自适应：55–85 字为主 · 1–2 条约 100 字 · 少量短评</span>
+          </div>
+          <p class="foot-note prompt-hint">
+            <button type="button" class="btn-link" id="btn-prompt-inline">查看本次提示词与规则原文</button>
+          </p>
+        </div>
+      </div>
+    </div>
+
     <div class="modal hidden" id="prompt-modal">
       <div class="modal-panel modal-wide">
         <div class="modal-head">

@@ -382,6 +382,23 @@ function renderProductTags() {
  * 渲染：事实卡
  * --------------------------------------------------------- */
 
+/* ---------------- 二层窗口：事实卡复核 / 高级设置 ---------------- */
+
+function openFactsModal() {
+  renderFactCard();
+  $('#facts-modal').classList.remove('hidden');
+}
+
+function openAdvancedModal() {
+  renderAdvancedTags();
+  $('#advanced-modal').classList.remove('hidden');
+}
+
+function closeSideModals() {
+  $('#facts-modal').classList.add('hidden');
+  $('#advanced-modal').classList.add('hidden');
+}
+
 function renderFactSections() {
   const container = $('#fact-sections');
   container.innerHTML = '';
@@ -1069,7 +1086,7 @@ async function extractFacts() {
     state.extraction = data.extraction;
     if (!state.factCard.产品名称 && productName) state.factCard.产品名称 = productName;
     $('#confirm-facts').checked = false;
-    $('#facts-toggle').open = true;
+    openFactsModal();
     renderFactCard();
     $('#extract-note').textContent = data.extraction?.note || '';
     toast('事实卡已生成，请核对后勾选确认');
@@ -1781,6 +1798,21 @@ function bindEvents() {
   $('#btn-save-config').addEventListener('click', saveSettings);
   $('#btn-test-config').addEventListener('click', testConnection);
   $('#btn-load-models').addEventListener('click', loadModels);
+
+  // 二层窗口：事实卡复核 / 高级设置
+  $('#btn-open-facts').addEventListener('click', openFactsModal);
+  $('#btn-close-facts').addEventListener('click', () => $('#facts-modal').classList.add('hidden'));
+  $('#facts-modal').addEventListener('click', (event) => {
+    if (event.target === $('#facts-modal')) $('#facts-modal').classList.add('hidden');
+  });
+  $('#btn-open-advanced').addEventListener('click', openAdvancedModal);
+  $('#btn-close-advanced').addEventListener('click', () => $('#advanced-modal').classList.add('hidden'));
+  $('#advanced-modal').addEventListener('click', (event) => {
+    if (event.target === $('#advanced-modal')) $('#advanced-modal').classList.add('hidden');
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeSideModals();
+  });
 
   // 历史记录
   $('#btn-history').addEventListener('click', () => {
