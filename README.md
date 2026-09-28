@@ -314,6 +314,7 @@ $env:BUYER_REVIEW_TEST_SHORT='1'; $env:BUYER_REVIEW_PORT='8798'; node server.js
 | 版本 | Git 标记 | 内容 |
 | --- | --- | --- |
 | v0.1.0 | 标签 `v0.1.0`（分支 `main` 的第一个提交） | 第一版可运行版本：文字/图片 → 产品事实卡 → 10 条模拟评论 → 编辑 / 单条重生成 / 复制 / 导出 Markdown 与 Excel |
+| v0.2.0 | 标签 `v0.2.0`（分支 `我的改版`） | UI 重构三阶段 + 生成性能优化 + 启动体验：左右双栏 AI 工作台、左侧配置区压缩、右侧 Review Card（内联编辑 / 单条重生成 / 质量检查）、真实 SSE 流式输出、12 条候选 + 动态补齐、提示词面板、历史记录、桌面快捷方式与自定义图标 |
 
 找回方法（在 `D:\评论\买家评论生成工具` 目录里执行）：
 
@@ -321,10 +322,13 @@ $env:BUYER_REVIEW_TEST_SHORT='1'; $env:BUYER_REVIEW_PORT='8798'; node server.js
 cd "D:\评论\买家评论生成工具"
 
 git log --oneline --decorate     # 看全部历史，v0.1.0 就是第一版
-git show v0.1.0 --stat           # 看这一版改了哪些文件
-git checkout v0.1.0              # 把工作目录切回这一版
-git checkout main                # 切回最新版本
+git show v0.2.0 --stat           # 看这一版改了哪些文件
+git checkout v0.2.0              # 切回这一版（当前最新存档）
+git checkout 我的改版             # 切回开发分支
 ```
+
+- 两个存档点：`v0.1.0`（最初可用版本）、`v0.2.0`（UI 重构 + 性能优化后的版本）
+- 除 git 之外，另有一份 zip 存档在 `D:\评论\存档\` 下，解压即可运行（不含 node_modules，首次启动会自动安装）
 
 - 网页工具的入口：`启动.cmd`，地址 <http://127.0.0.1:8787>
 - 生成出来的成品示例：`exports\` 目录
