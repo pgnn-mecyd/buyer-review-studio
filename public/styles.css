@@ -1123,15 +1123,18 @@ input:focus, textarea:focus, select:focus {
   inset: 0;
   background: rgba(0, 0, 0, 0.32);
   display: flex;
-  align-items: flex-start;
+  /* 二层窗口居中：水平垂直都居中 */
+  align-items: center;
   justify-content: center;
-  padding: 48px 16px;
+  padding: 24px 16px;
   z-index: 50;
   overflow: auto;
 }
 
 .modal-panel {
   width: min(760px, 100%);
+  /* 内容比视口高时，margin:auto 保证顶部依然能滚到，不会被裁掉 */
+  margin: auto;
   background: #fff;
   border-radius: var(--radius-lg);
   padding: var(--space-6);
