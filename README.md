@@ -12,9 +12,10 @@
 
 1. 确认已安装 Node.js 18 或更高版本（本机已验证：Node v24.21.0）。
    在命令行执行 `node -v` 能显示版本号即可。
-2. 双击项目目录里的 **`启动.cmd`**。
+2. 双击项目目录里的 **`启动.cmd`**（或在桌面上双击 **「买家评论生成器」** 快捷方式）。
    - 首次运行会自动执行 `npm install` 安装唯一依赖 `exceljs`（约 1–2 分钟，需要联网）。
    - 之后会自动打开浏览器并访问 <http://127.0.0.1:8787>。
+   - **服务已经在运行时**（比如你已经开过），双击只会再打开一次浏览器，不会重复启动第二个实例。
 3. 关闭服务：在启动窗口按 `Ctrl + C`。
 
 命令行方式（等价）：
@@ -26,6 +27,14 @@ node server.js
 ```
 
 端口 8787 被占用时会自动顺延到 8788、8789……以窗口里打印的地址为准。
+
+> 桌面快捷方式指向 `启动.cmd`，用的是本项目的图标 `assets\app.ico`。
+> 如果快捷方式丢了，运行 `powershell -ExecutionPolicy Bypass -File scripts\create-desktop-shortcut.ps1` 可以重建；
+> 图标可以用 `scripts\make-icon.ps1` 重新生成。
+>
+> 注意：`启动.cmd` 与 `scripts\launch.ps1` 都刻意写成 **纯 ASCII 源码**（中文提示用 base64 存放）。
+> 原因是 cmd.exe 解析批处理文件时用的是控制台代码页——从资源管理器双击是 GBK、从 UTF-8 终端调用是 UTF-8，
+> 同一个文件在两种环境下会解析出不同结果，纯 ASCII 才能两种都稳。
 
 ---
 
@@ -116,6 +125,7 @@ BUYER_REVIEW_OCR_MODEL=
 ```
 买家评论生成工具\
 ├─ 启动.cmd                  双击启动（含首次依赖安装）
+├─ assets\app.ico            桌面快捷方式图标（256/64/48/32/16）
 ├─ server.js                 本地服务端：模型调用、事实卡、生成、导出
 ├─ src\
 │  ├─ config.js              配置优先级与 Codex 配置复用
@@ -128,7 +138,13 @@ BUYER_REVIEW_OCR_MODEL=
 │  └─ ocr-ps51.ps1           Windows.Media.Ocr 调用脚本
 ├─ public\                   网页前端（原生 HTML/CSS/JS，无构建步骤）
 ├─ rules\买家评论生成规则_v0.4.3_完整版.md   规则蓝本（提示词直接引用）
-├─ scripts\debug-generate.js 排查模型输出用的调试脚本
+├─ scripts\
+│  ├─ launch.ps1             启动逻辑（纯 ASCII，中文提示走 base64）
+│  ├─ create-desktop-shortcut.ps1  重建桌面快捷方式
+│  ├─ make-icon.ps1          生成 assets\app.ico
+│  ├─ debug-generate.js      排查模型输出的调试脚本
+│  ├─ perf-stream.js         流式生成性能测试
+│  └─ verify-export.js       校验导出的 Markdown / Excel
 ├─ exports\                  导出示例
 └─ config.example.json       配置示例
 ```
