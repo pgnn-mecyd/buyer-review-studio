@@ -163,15 +163,16 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 /* ---------------- 左右双栏 ---------------- */
 .workspace {
   display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
-  gap: var(--space-6);
+  /* 左辅右主：左栏收窄成工具栏，右栏是主工作区 */
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: 30px;
   align-items: start;
 }
 
 .config-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 12px;
   position: sticky;
   top: calc(var(--nav-h) + var(--space-4));
   max-height: calc(100vh - var(--nav-h) - var(--space-8));
@@ -186,6 +187,8 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 
 .result-panel {
   min-width: 0;
+  /* 相对左侧轻微下沉，打破左右机械对齐 */
+  margin-top: 16px;
   background: var(--bg-card);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
@@ -201,7 +204,7 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
   padding: 20px;
 }
 
-.config-panel .card { border-radius: var(--radius-md); padding: 18px; }
+.config-panel .card { border-radius: var(--radius-md); padding: 16px; }
 
 .card-head {
   display: flex;
@@ -690,7 +693,7 @@ input:focus, textarea:focus, select:focus {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: 16px 20px;
+  padding: 18px 24px;
   border-bottom: 1px solid var(--border-light);
   flex-wrap: wrap;
   background: #fff;
@@ -743,7 +746,20 @@ input:focus, textarea:focus, select:focus {
 }
 
 .result-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-.result-body { padding: 20px; }
+.result-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  /* 空状态时右栏也要有主工作区的高度感，避免"又空又弱" */
+  min-height: 460px;
+}
+
+.result-body #results-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
 
 .empty-lg { padding: var(--space-12) var(--space-6); }
 .empty-lg .empty-title { font-size: 15px; color: var(--text-secondary); margin-bottom: 4px; }
