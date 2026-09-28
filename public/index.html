@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>买家评论生成器 · AI 模拟文案</title>
+    <link rel="icon" href="/app.ico" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -33,24 +34,23 @@
       </div>
 
       <div class="workspace">
-        <!-- ============ 左侧：配置 ============ -->
-        <aside class="config-panel">
+        <!-- ============ 上方：配置区 ============ -->
+        <section class="config-area">
           <section class="card" id="card-product">
             <header class="card-head">
               <h2>产品信息</h2>
               <span class="card-hint" id="product-hint"></span>
             </header>
 
-            <div class="product-media">
-              <div class="thumbs" id="thumbs"></div>
-              <button class="media-add" id="btn-choose-file" type="button">
-                <span class="media-add-icon">＋</span>
-                <span id="media-add-label">添加产品图</span>
-              </button>
-              <input id="file-input" type="file" accept="image/*" multiple hidden />
-            </div>
-
-            <div class="field-pair">
+            <div class="product-main">
+              <div class="product-media">
+                <div class="thumbs" id="thumbs"></div>
+                <button class="media-add" id="btn-choose-file" type="button">
+                  <span class="media-add-icon">＋</span>
+                  <span id="media-add-label">添加产品图</span>
+                </button>
+                <input id="file-input" type="file" accept="image/*" multiple hidden />
+              </div>
               <div class="field">
                 <label for="product-name">产品名称</label>
                 <input id="product-name" class="input-plain" type="text" placeholder="点击填写" autocomplete="off" />
@@ -59,22 +59,26 @@
                 <label for="product-spec">产品规格</label>
                 <input id="product-spec" class="input-plain" type="text" placeholder="100ml / 30 片" autocomplete="off" />
               </div>
+              <div class="product-main-cta">
+                <button class="btn btn-secondary" id="btn-extract">识别图片 · 生成事实卡</button>
+              </div>
             </div>
 
-            <div class="field">
-              <label>核心卖点</label>
-              <div class="tags" id="tags-selling"></div>
+            <div class="chip-line chip-line-pair">
+              <div class="chip-group">
+                <span class="chip-line-label">核心卖点</span>
+                <div class="tags" id="tags-selling"></div>
+              </div>
+              <div class="chip-group">
+                <span class="chip-line-label">产品功效<span class="label-note">未确认的功效不会写进评论</span></span>
+                <div class="tags" id="tags-efficacy"></div>
+              </div>
             </div>
 
-            <div class="field">
-              <label>产品功效<span class="label-note">未确认的功效不会写进评论</span></label>
-              <div class="tags" id="tags-efficacy"></div>
-            </div>
-
-            <button class="btn btn-secondary btn-block" id="btn-extract">识别图片 · 生成事实卡</button>
-            <p class="foot-note" id="extract-note">文字与图片可以同时使用；也可以只用其中一种。</p>
+            <p class="foot-note product-note" id="extract-note">文字与图片可以同时使用；也可以只用其中一种。</p>
           </section>
 
+          <div class="config-row">
           <section class="card" id="card-facts">
             <details class="section-toggle" id="facts-toggle">
               <summary class="card-head as-summary">
@@ -132,30 +136,36 @@
               <p class="foot-note hidden" id="strength-note">已高于规则默认区间：只会让肯定更明确、更具体，不会放宽事实边界。</p>
             </div>
 
-            <div class="setting-row">
-              <span class="setting-label">评论长度</span>
-              <select class="select-inline" id="length-mode">
-                <option value="自动">自动</option>
-                <option value="偏短">偏短</option>
-                <option value="偏长">偏长</option>
-              </select>
-            </div>
+            <div class="setting-row-pair">
+              <div class="setting-row">
+                <span class="setting-label">评论长度</span>
+                <select class="select-inline" id="length-mode">
+                  <option value="自动">自动</option>
+                  <option value="偏短">偏短</option>
+                  <option value="偏长">偏长</option>
+                </select>
+              </div>
 
-            <div class="setting-row">
-              <span class="setting-label">评论风格</span>
-              <select class="select-inline" id="style">
-                <option value="真实买家感">真人买家感</option>
-                <option value="以平静肯定为主">平静肯定为主</option>
-                <option value="以强烈满意为主">强烈满意为主</option>
-                <option value="以短直球为主">短直球为主</option>
-              </select>
+              <div class="setting-row">
+                <span class="setting-label">评论风格</span>
+                <select class="select-inline" id="style">
+                  <option value="真实买家感">真人买家感</option>
+                  <option value="以平静肯定为主">平静肯定为主</option>
+                  <option value="以强烈满意为主">强烈满意为主</option>
+                  <option value="以短直球为主">短直球为主</option>
+                </select>
+              </div>
             </div>
+          </section>
 
+          <section class="card" id="card-advanced">
             <details class="accordion" id="advanced">
-              <summary>
-                <span>高级设置</span>
-                <span class="summary-hint" id="advanced-hint">低频参数</span>
-                <span class="chevron" aria-hidden="true">›</span>
+              <summary class="card-head as-summary">
+                <h2>高级设置</h2>
+                <span class="summary-tail">
+                  <span class="card-hint" id="advanced-hint">低频参数</span>
+                  <span class="chevron" aria-hidden="true">›</span>
+                </span>
               </summary>
               <div class="accordion-body">
                 <div class="setting-row">
@@ -195,13 +205,14 @@
               </div>
             </details>
           </section>
+          </div><!-- /config-row -->
 
-          <div class="sticky-cta">
+          <div class="config-actions">
             <div class="cta-summary" id="cta-summary">10 条 · 强度 8.0 · 真人买家感</div>
             <button class="btn btn-primary btn-lg" id="btn-generate" disabled>生成 10 条评论</button>
             <p class="cta-hint" id="generate-hint">生成前请先核对事实卡</p>
           </div>
-        </aside>
+        </section><!-- /config-area -->
 
         <!-- ============ 右侧：结果 ============ -->
         <section class="result-panel">

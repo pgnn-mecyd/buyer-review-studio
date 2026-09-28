@@ -125,7 +125,7 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 
 /* ---------------- 页面容器 ---------------- */
 .page {
-  max-width: 1560px;
+  max-width: 1520px;
   margin: 0 auto;
   padding: var(--space-8) var(--space-8) var(--space-12);
 }
@@ -160,35 +160,33 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 .info-strip strong { color: var(--text-primary); font-weight: 600; }
 .info-icon { color: var(--text-tertiary); }
 
-/* ---------------- 左右双栏 ---------------- */
+/* ---------------- 上下结构：上方配置 + 下方结果 ---------------- */
 .workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.config-area {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 配置区第二层：事实卡 / 评论策略 / 高级设置 横向并排 */
+.config-row {
   display: grid;
-  /* 左辅右主：左栏收窄成工具栏，右栏是主工作区 */
-  grid-template-columns: 330px minmax(0, 1fr);
-  gap: 30px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
   align-items: start;
 }
 
-.config-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  position: sticky;
-  top: calc(var(--nav-h) + var(--space-4));
-  max-height: calc(100vh - var(--nav-h) - var(--space-8));
-  overflow-y: auto;
-  padding-right: 4px;
-  scrollbar-width: thin;
-}
-
-.config-panel::-webkit-scrollbar { width: 8px; }
-.config-panel::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); border-radius: 999px; }
-.config-panel::-webkit-scrollbar-track { background: transparent; }
+/* 展开的模块铺满整行，避免只把某一列拉得很长 */
+.config-row > .card:has(details[open]) { grid-column: 1 / -1; }
 
 .result-panel {
+  width: 100%;
   min-width: 0;
-  /* 相对左侧轻微下沉，打破左右机械对齐 */
-  margin-top: 16px;
   background: var(--bg-card);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
@@ -204,7 +202,7 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
   padding: 20px;
 }
 
-.config-panel .card { border-radius: var(--radius-md); padding: 16px; }
+.config-area .card { border-radius: var(--radius-md); padding: 16px; }
 
 .card-head {
   display: flex;
@@ -221,7 +219,69 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 .as-summary::-webkit-details-marker { display: none; }
 
 /* ---------------- 产品信息 ---------------- */
-.product-media { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
+/* 产品信息横向组织：图片 | 名称 | 规格 */
+.product-main {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) minmax(140px, 200px) auto;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 4px;
+}
+
+.product-main-cta { display: flex; align-items: center; }
+.product-main-cta .btn { height: 40px; }
+
+.product-media {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  max-width: 300px;
+  padding-bottom: 2px;
+  margin-bottom: 0;
+}
+
+.product-main .field { margin-bottom: 0; }
+
+/* 卖点 / 功效：标签在左、chips 在右的单行结构 */
+.chip-line {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-light);
+}
+
+.chip-line:first-of-type { margin-top: 10px; }
+
+.chip-line-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chip-line-label .label-note { font-size: 11px; line-height: 1.4; }
+
+/* 卖点与功效并排，进一步压低配置区高度 */
+.chip-line-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+
+.chip-group {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+
+.product-note {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-light);
+}
 
 .thumbs { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 
@@ -284,9 +344,7 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
 .label-note { font-size: 12px; color: var(--text-tertiary); font-weight: 400; }
 
 /* 两列紧凑字段（产品名称 + 规格） */
-.field-pair { display: grid; grid-template-columns: 1.15fr 1fr; gap: var(--space-3); }
-.config-panel .field { margin-bottom: var(--space-3); }
-.field-pair .field { margin-bottom: var(--space-3); }
+.config-area .field { margin-bottom: var(--space-3); }
 
 input[type="text"], input[type="password"], input[type="number"], textarea, select {
   width: 100%;
@@ -502,8 +560,8 @@ input:focus, textarea:focus, select:focus {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  min-height: 40px;
-  padding: 4px 0;
+  min-height: 32px;
+  padding: 1px 0;
   border-bottom: 1px solid var(--border-light);
 }
 
@@ -511,8 +569,20 @@ input:focus, textarea:focus, select:focus {
 .setting-label { font-size: 14px; color: var(--text-primary); }
 
 /* 强度块：标题行 + 滑杆，占一个整行但不是一行输入框 */
-.setting-block { padding: 6px 0 8px; border-bottom: 1px solid var(--border-light); }
-.setting-row.as-block-head { border-bottom: none; min-height: 30px; padding-bottom: 0; }
+.setting-block { padding: 3px 0 5px; border-bottom: 1px solid var(--border-light); }
+.setting-row.as-block-head { border-bottom: none; min-height: 26px; padding-bottom: 0; }
+
+/* 长度与风格并排，进一步压低评论策略模块 */
+.setting-row-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.setting-row-pair > .setting-row:last-child { border-bottom: none; }
+
+.setting-row-pair .select-inline { min-width: 88px; max-width: 60%; }
 
 /* 行内下拉：平时像文字，hover / focus 才像控件 */
 .select-inline {
@@ -599,7 +669,7 @@ input:focus, textarea:focus, select:focus {
   border-radius: 999px;
   background: #e5e5ea;
   outline: none;
-  margin: 8px 0 2px;
+  margin: 4px 0 0;
 }
 
 .range::-webkit-slider-thumb {
@@ -649,6 +719,14 @@ input:focus, textarea:focus, select:focus {
 
 .accordion > summary::-webkit-details-marker { display: none; }
 
+/* 作为独立卡片时，标题行就是卡片头，不需要分隔线 */
+.card > .accordion > summary { border-top: none; min-height: 0; padding: 0; }
+.card > .accordion > .accordion-body {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
+}
+
 .summary-hint { font-size: 12px; color: var(--text-tertiary); font-weight: 400; margin-left: auto; margin-right: 2px; text-align: right; }
 
 .accordion-body { padding: var(--space-3) 0 var(--space-1); display: flex; flex-direction: column; gap: var(--space-3); }
@@ -665,27 +743,28 @@ input:focus, textarea:focus, select:focus {
 
 .meta-value { color: var(--text-tertiary); text-align: right; }
 
-/* ---------------- 生成 CTA ---------------- */
-.sticky-cta {
-  position: sticky;
-  bottom: 0;
-  margin-top: var(--space-1);
-  padding: var(--space-3) 14px var(--space-3);
-  background: #fff;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.04), var(--shadow-card);
+/* ---------------- 生成 CTA（配置区底部右侧） ---------------- */
+.config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .cta-summary {
   font-size: 12px;
   color: var(--text-secondary);
-  text-align: center;
-  margin-bottom: 8px;
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.cta-hint { font-size: 12px; color: var(--text-tertiary); text-align: center; margin-top: 6px; }
+.cta-hint { font-size: 12px; color: var(--text-tertiary); text-align: right; }
+
+/* 提示文字排到最左，摘要与主按钮靠右 */
+.config-actions .cta-hint { order: -1; margin-right: auto; }
+
+.config-actions .btn-lg { width: auto; min-width: 260px; }
 
 /* ---------------- 结果区 ---------------- */
 .result-head {
@@ -1213,19 +1292,21 @@ input:focus, textarea:focus, select:focus {
 
 @media (max-width: 1180px) {
   .page { padding: var(--space-6) var(--space-4) var(--space-8); }
-  .workspace { grid-template-columns: 320px minmax(0, 1fr); gap: var(--space-4); }
+  .workspace { gap: var(--space-6); }
+  .config-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .product-main { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); }
 }
 
 @media (max-width: 1023px) {
-  .workspace { grid-template-columns: 1fr; }
-  .config-panel {
-    position: static;
-    max-height: none;
-    overflow: visible;
-    padding-right: 0;
-  }
-  .sticky-cta { position: static; background: none; padding-top: var(--space-2); }
-  .result-panel { margin-top: var(--space-2); }
+  .config-row { grid-template-columns: 1fr; }
+  .product-main { grid-template-columns: 1fr; }
+  .product-media { max-width: 100%; }
+  .chip-line { grid-template-columns: 1fr; gap: 6px; }
+  .chip-line-label { padding-top: 0; }
+  .config-actions { justify-content: stretch; }
+  .config-actions .btn-lg { width: 100%; min-width: 0; }
+  .cta-hint { margin-right: 0; text-align: left; }
+  .cta-summary { text-align: left; }
   .topnav { padding: 0 var(--space-4); }
   .model-status { display: none; }
 }
