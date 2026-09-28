@@ -200,8 +200,11 @@ function startChipInput(container, placeholder, commit) {
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
+      event.stopPropagation();
       finish(true);
     } else if (event.key === 'Escape') {
+      // 先取消这个输入框，不要让 Esc 继续去关掉整个弹层
+      event.stopPropagation();
       finish(false);
     }
   });
@@ -394,9 +397,11 @@ function openAdvancedModal() {
   $('#advanced-modal').classList.remove('hidden');
 }
 
-function closeSideModals() {
-  $('#facts-modal').classList.add('hidden');
-  $('#advanced-modal').classList.add('hidden');
+/** 四个二层窗口统一关闭（Esc / 遮罩 / 关闭按钮都用它） */
+function closeAllModals() {
+  ['#facts-modal', '#advanced-modal', '#settings-modal', '#prompt-modal'].forEach((selector) => {
+    $(selector).classList.add('hidden');
+  });
 }
 
 function renderFactSections() {
@@ -706,8 +711,14 @@ function renderComments() {
         autoGrow(textarea);
       });
       textarea.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') cancelEdit();
-        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') saveEdit(index);
+        if (event.key === 'Escape') {
+          event.stopPropagation();
+          cancelEdit();
+        }
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+          event.preventDefault();
+          saveEdit(index);
+        }
       });
       const actions = el('div', 'editor-actions');
       actions.append(
@@ -1811,7 +1822,7 @@ function bindEvents() {
     if (event.target === $('#advanced-modal')) $('#advanced-modal').classList.add('hidden');
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeSideModals();
+    if (event.key === 'Escape') closeAllModals();
   });
 
   // 历史记录
