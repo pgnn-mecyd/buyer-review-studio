@@ -79,38 +79,6 @@
           </section>
 
           <div class="config-row">
-          <section class="card" id="card-facts">
-            <details class="section-toggle" id="facts-toggle">
-              <summary class="card-head as-summary">
-                <h2>事实卡复核</h2>
-                <span class="summary-tail">
-                  <span class="card-hint" id="facts-summary">尚未生成</span>
-                  <span class="chevron" aria-hidden="true">›</span>
-                </span>
-              </summary>
-              <div class="toggle-body">
-                <div id="facts-empty" class="empty">填写产品信息后，点上方按钮识别并生成事实卡。</div>
-                <div id="facts-editor" class="hidden">
-                  <div class="fact-meta">
-                    <div class="field">
-                      <label for="fact-name">产品名称</label>
-                      <input id="fact-name" type="text" />
-                    </div>
-                    <div class="field">
-                      <label for="fact-category">品类</label>
-                      <input id="fact-category" type="text" />
-                    </div>
-                  </div>
-                  <div id="fact-sections"></div>
-                  <label class="checkline">
-                    <input type="checkbox" id="confirm-facts" />
-                    <span>我已核对事实卡：写进评论的信息都真实存在，待确认的内容不参与生成。</span>
-                  </label>
-                </div>
-              </div>
-            </details>
-          </section>
-
           <section class="card" id="card-strategy">
             <header class="card-head">
               <h2>评论策略</h2>
@@ -156,6 +124,38 @@
                 </select>
               </div>
             </div>
+          </section>
+
+          <section class="card" id="card-facts">
+            <details class="section-toggle" id="facts-toggle">
+              <summary class="card-head as-summary">
+                <h2>事实卡复核</h2>
+                <span class="summary-tail">
+                  <span class="card-hint" id="facts-summary">尚未生成</span>
+                  <span class="chevron" aria-hidden="true">›</span>
+                </span>
+              </summary>
+              <div class="toggle-body">
+                <div id="facts-empty" class="empty">填写产品信息后，点上方按钮识别并生成事实卡。</div>
+                <div id="facts-editor" class="hidden">
+                  <div class="fact-meta">
+                    <div class="field">
+                      <label for="fact-name">产品名称</label>
+                      <input id="fact-name" type="text" />
+                    </div>
+                    <div class="field">
+                      <label for="fact-category">品类</label>
+                      <input id="fact-category" type="text" />
+                    </div>
+                  </div>
+                  <div id="fact-sections"></div>
+                  <label class="checkline">
+                    <input type="checkbox" id="confirm-facts" />
+                    <span>我已核对事实卡：写进评论的信息都真实存在，待确认的内容不参与生成。</span>
+                  </label>
+                </div>
+              </div>
+            </details>
           </section>
 
           <section class="card" id="card-advanced">
