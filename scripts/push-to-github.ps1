@@ -8,6 +8,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function T([string]$b64) {
+  return [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
+}
+
+# local development branch name (kept as base64 so the script stays ASCII-only)
+$devBranch = T '5oiR55qE5pS554mI'
+
 $projectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location -LiteralPath $projectRoot
 
@@ -28,13 +36,13 @@ if ($LASTEXITCODE -eq 0 -and $existing) {
 
 # make sure the published default branch carries the latest version
 git checkout main
-git merge --ff-only '我的改版'
+git merge --ff-only $devBranch
 
 Write-Host ""
-Write-Host "pushing main / 我的改版 / tags ..."
+Write-Host "pushing main / $devBranch / tags ..."
 Write-Host "(a GitHub sign-in window may pop up - complete it to continue)"
 git push -u origin main
-git push origin '我的改版'
+git push origin $devBranch
 git push origin --tags
 
 Write-Host ""
