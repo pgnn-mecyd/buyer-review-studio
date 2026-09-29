@@ -397,6 +397,62 @@ function openAdvancedModal() {
   $('#advanced-modal').classList.remove('hidden');
 }
 
+function previewRow(label, value) {
+  const row = el('div', 'setting-row');
+  row.append(el('span', 'setting-label', label), el('span', 'setting-value-sm', value));
+  return row;
+}
+
+/** 事实卡卡片的只读摘要（点卡片才进二层窗口编辑） */
+function renderFactsPreview() {
+  const box = $('#facts-preview');
+  if (!box) return;
+  box.innerHTML = '';
+  const card = state.factCard;
+  if (!card) {
+    box.appendChild(el('p', 'module-empty', '尚未生成事实卡：填写产品信息后，点上方「识别图片 · 生成事实卡」。'));
+    $('#facts-summary').textContent = '尚未生成';
+    return;
+  }
+  const known = card.明确信息.length;
+  const pending = card.待确认.length;
+  box.append(previewRow('明确信息', `${known} 条`), previewRow('待确认', `${pending} 条`));
+
+  const list = card.明确信息
+    .map((row) => String(row.内容 || '').trim())
+    .filter(Boolean);
+  if (list.length) {
+    const chips = el('div', 'module-chips');
+    list.slice(0, 2).forEach((text) => {
+      const chip = el('span', 'chip');
+      chip.appendChild(el('span', 'chip-label', text.length > 18 ? `${text.slice(0, 18)}…` : text));
+      chips.appendChild(chip);
+    });
+    if (list.length > 2) chips.appendChild(el('span', 'module-more', `+${list.length - 2} 条`));
+    box.appendChild(chips);
+  }
+  const confirmed = $('#confirm-facts')?.checked;
+  $('#facts-summary').textContent = confirmed ? '已核对' : '待核对';
+}
+
+/** 高级设置卡片的只读摘要 */
+function renderAdvancedPreview() {
+  const box = $('#advanced-preview');
+  if (!box) return;
+  const card = state.factCard;
+  const rows = [
+    ['生成语言', state.options.language || '中文'],
+    ['表达结构', `${state.options.structure.length} 项`],
+    ['使用场景', card ? `${card['允许场景与动作'].length} 个` : '待生成事实卡'],
+    ['功效关键词', card ? `${card['允许表达的结果'].length} 个` : '待生成事实卡'],
+    ['禁用表达', `${state.options.banned.length} 条`],
+  ];
+  box.innerHTML = '';
+  rows.forEach(([label, value]) => box.appendChild(previewRow(label, value)));
+  const card0 = state.factCard;
+  $('#advanced-hint').textContent = `${state.options.structure.length} 项结构 · ${card0 ? card0['允许场景与动作'].length : 0} 个场景 · ${state.options.banned.length} 条禁用表达`;
+}
+
 /** 四个二层窗口统一关闭（Esc / 遮罩 / 关闭按钮都用它） */
 function closeAllModals() {
   ['#facts-modal', '#advanced-modal', '#settings-modal', '#prompt-modal'].forEach((selector) => {
@@ -539,12 +595,8 @@ function renderFactCard() {
     $('#fact-name').value = state.factCard.产品名称 || '';
     $('#fact-category').value = state.factCard.品类 || '';
     renderFactSections();
-    const known = state.factCard.明确信息.length;
-    const pending = state.factCard.待确认.length;
-    $('#facts-summary').textContent = `明确 ${known} 条 · 待确认 ${pending} 条`;
-  } else {
-    $('#facts-summary').textContent = '尚未生成';
   }
+  renderFactsPreview();
   renderProductTags();
   renderAdvancedTags();
 }
@@ -604,6 +656,7 @@ function renderAdvancedTags() {
 
   const counts = `${state.options.structure.length} 项结构 · ${card ? card['允许场景与动作'].length : 0} 个场景 · ${state.options.banned.length} 条禁用表达`;
   $('#advanced-hint').textContent = counts;
+  renderAdvancedPreview();
 }
 
 /* --------------------------------------------------------- *
@@ -1722,6 +1775,7 @@ function bindEvents() {
   });
   $('#confirm-facts').addEventListener('change', () => {
     updateCTA();
+     renderFactsPreview();
     persist();
   });
 
@@ -1811,12 +1865,12 @@ function bindEvents() {
   $('#btn-load-models').addEventListener('click', loadModels);
 
   // 二层窗口：事实卡复核 / 高级设置
-  $('#btn-open-facts').addEventListener('click', openFactsModal);
+  $('#card-facts').addEventListener('click', openFactsModal);
   $('#btn-close-facts').addEventListener('click', () => $('#facts-modal').classList.add('hidden'));
   $('#facts-modal').addEventListener('click', (event) => {
     if (event.target === $('#facts-modal')) $('#facts-modal').classList.add('hidden');
   });
-  $('#btn-open-advanced').addEventListener('click', openAdvancedModal);
+  $('#card-advanced').addEventListener('click', openAdvancedModal);
   $('#btn-close-advanced').addEventListener('click', () => $('#advanced-modal').classList.add('hidden'));
   $('#advanced-modal').addEventListener('click', (event) => {
     if (event.target === $('#advanced-modal')) $('#advanced-modal').classList.add('hidden');
