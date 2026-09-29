@@ -178,17 +178,18 @@ ol, ul { margin: 0; padding: 0; list-style: none; }
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
-  align-items: start;
+  /* 三张卡片等高，视觉上是同一排的卡片 */
+  align-items: stretch;
 }
 
 /* 可点击的模块卡片：外观与评论策略卡一致，点整卡开二层窗口 */
 .module-card { cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s; }
 .module-card:hover { border-color: rgba(0, 0, 0, 0.1); box-shadow: var(--shadow-card); }
 
-.module-body { display: flex; flex-direction: column; }
+.module-body { display: flex; flex-direction: column; flex: 1; }
 .module-body .setting-row:last-child { border-bottom: none; }
 
-.module-empty { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; }
+.module-empty { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; padding-top: 10px; }
 
 .setting-value-sm {
   font-size: 13px;

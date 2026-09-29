@@ -410,7 +410,9 @@ function renderFactsPreview() {
   box.innerHTML = '';
   const card = state.factCard;
   if (!card) {
-    box.appendChild(el('p', 'module-empty', '尚未生成事实卡：填写产品信息后，点上方「识别图片 · 生成事实卡」。'));
+    // 空状态也用同样的「标签 + 值」行，保持与旁边两张卡片同构
+    box.append(previewRow('明确信息', '—'), previewRow('待确认', '—'));
+    box.appendChild(el('p', 'module-empty', '尚未生成：填写产品信息后，点上方「识别图片 · 生成事实卡」。'));
     $('#facts-summary').textContent = '尚未生成';
     return;
   }
