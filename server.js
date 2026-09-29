@@ -491,10 +491,16 @@ function buildPreferenceNote(options) {
   const lines = [];
   const strength = Number.parseFloat(options.strength);
   if (Number.isFinite(strength)) {
-    const clamped = Math.min(Math.max(strength, 6.5), 8.5);
+    // 允许 6.5–10：高于 8 只放大语气热情度，不放开事实与合规边界
+    const clamped = Math.min(Math.max(strength, 6.5), 10);
     lines.push(
       `整批表达力度目标：${clamped.toFixed(1)}/10（规则蓝本默认区间 7.5–8）。力度调高只允许更明确、更具体的肯定，禁止编造事实、绝对化表达和医疗化表述。`,
     );
+    if (clamped > 8.5) {
+      lines.push(
+        `注意：本批力度 ${clamped.toFixed(1)}/10 已明显高于规则默认。可以更热情、更直接地表达满意，但不得使用感叹号堆砌、网络口头禅、带货收尾（闭眼冲、推荐给大家、继续囤），也不得出现绝对化或医疗化表述。`,
+      );
+    }
   }
   if (options.style && options.style !== '真实买家感') {
     lines.push(`整批情绪侧重：${options.style}。仍然全部正面，并继续打散顺序，不给第 1–10 条固定人格岗位。`);
